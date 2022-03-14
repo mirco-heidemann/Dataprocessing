@@ -1,0 +1,247 @@
+---
+title: "Aufbereitung der GVZ Überschwemmungsdaten für die Uni Basel"
+subtitle: "2007 bis 2019"
+author: "Mirco Heidemann"
+date: "03/2020"
+output:
+  pdf_document: default
+---
+
+### Kurzbeschreibung des Vorhabens & Zweck
+Wir arbeiten an den Effekten von Hochwasser und Hochwasserrisiko auf die Bewertung von Immobilien.
+Uns interessiert, ob Immobilien- und Grundstückskäufer Risiken in ihrer Entscheidung rational
+miteinbeziehen. Unsere primäre Datenquelle sind Immobilienpreise und Gefahrenkarten vom statistischen
+Amt des Kantons Zürich, zusammen mit den Daten der wichtigsten Hochwasser, welche seit 2007 im
+Kanton gemessen wurden. Um den Effekt dieser Hochwasser besser abschätzen zu können, wären wir
+interessiert an Daten der GVZ über tatsächlich vom Hochwasser betroffene Gebäude und Grundstücke.
+Ziel ist es, Ergebnisse des Forschungsprojekts in einer wissenschaftlichen Fachzeitschrift zu publizieren.
+
+### Benötigte Daten
+Um den Effekt dieser Hochwasser besser abschätzen zu können, beantragen wir hiermit die
+Schadensdaten der GVZ über tatsächlich vom Hochwasser betroffene Gebäude und Grundstücke. Was
+uns vorschwebt sind georeferenzierte Gebäudeschadendaten von 2006 – heute, die mit unseren
+Primärdaten verlinkt werden können. Um für mögliche Einflussfaktoren zu kontrollieren, benötigen wir
+desweiteren Charakteristika der Häuser. Dabei denken wir an die Nutzungsklassen, den
+Versicherungswert und die Gefahrenkarten (optisch und Fließgeschwindigkeit).
+Die Schadensdaten wären in binärer Form hilfreich, d.h. für alle Schadenmeldungen ein 1 bei einem
+ausbezahlten Schaden und eine 0 bei keiner Schadenauszahlung. Desweitern wären Variablen in binärer
+Form, die angeben ob der Schaden sehr schwerwiegend war, d.h. eine 1 wenn ja (Top 20%, Top 10%
+und Top 5%) und eine 0 bei nein, sehr hilfreich. Personifizierte Daten werden nicht benötigt.
+Zusätzlich wäre die GVZ Nummer der jeweiligen Liegschaft gut, da diese beim Statistischen Amt ebenfalls
+vorliegt und die Verlinkung vereinfachen würde.
+
+**Datenfelder:**
+- Nutzungsklassen
+- Versicherungswert: Wurde vom Rechtsdienst als kritisch eingestuft und darf nicht herausgegeben werden
+- Gefahrenkarten (Synoptisch, Fliesstiefe --> GIS Bearbeitung in Nachgang)
+- Überschwemmungsschadendaten (Geschätzte Schadensumme): Für alle Schadenmeldungen ein 1 bei einem ausbezahlten Schaden und eine 0 bei keiner Schadenauszahlung. Desweitern wären Variablen in binärer Form, die angeben ob der Schaden sehr schwerwiegend war, d.h. eine 1 wenn ja (Top 20%, Top 10% und Top 5%) und eine 0 bei nein, sehr hilfreich.
+- GVZ Nummer
+- Koordinaten
+
+Die Daten gehen an Stephanie Armbruster von der Uni Basel, Email: stephanie.armbruster@unibas.ch
+
+
+### Zeitspanne
+Von - bis Datum angeben
+```{r}
+von_dat <- "01.01.2006"
+bis_dat <- "31.12.2019"
+```
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+library(lubridate)
+
+## relative pfade
+pth_dat <- "I:/Climostatisticians/Data_Science/GVZ_Data/2020/"
+
+## turn off scientific notation
+options(scipen=999)
+```
+
+#### Import aller Schäden bis Ende letzten Jahres
+```{r}
+input_csv <- paste0(pth_dat, "SQL_Schaden_20200312.csv")
+
+dat <- read_delim(input_csv, delim = ";",
+           locale = locale(encoding = 'UTF-8'),
+           # locale = locale(encoding = 'ISO-8859-1'),
+           col_names = TRUE,
+           col_types = cols_only(
+             GebaeudeSuchbegriff = col_character(),
+             SchadenNr = col_character(),
+             SchadenDatum = col_date("%d.%m.%Y"),
+             Nutzungscode = col_integer(),
+             Nutzungsbeschreibung = col_character(),
+             SchadenArt = col_character(),
+             SchadenUrsache = col_character(),
+             SchadenSumme = col_number(),
+             Schaetzwert = col_number(),
+             KoordinateNord = col_character(),
+             KoordinateOrd = col_character()
+           )
+)
+```
+
+Umbennen der Variablen, filtern nach Elementar- und Feuerschäden sowie nach den Schadendaten im gewünschten Intervall.
+
+```{r}
+inter_dat <- interval(dmy(von_dat), dmy(bis_dat))
+
+df <- dat %>% mutate(gebnr_int = as.integer(str_remove(GebaeudeSuchbegriff, "-")),
+                     schad_nr =  as.character(SchadenNr),
+                     schad_datum = as.Date(SchadenDatum,"%d.%m.%Y"),
+                     schad_jahr = as.integer(format(schad_datum, "%Y")),
+                     schad_art = as.character(SchadenArt),
+                     schad_code = as.integer(str_extract(SchadenUrsache, "[[:digit:]]+")),
+                     schad_ursache = as.character(str_trim(gsub("\\d", "", SchadenUrsache), "left")),
+                     schad_geschaetzt = round(as.numeric(SchadenSumme)),
+                     nutzungs_code = as.integer(Nutzungscode),
+                     nutzung =  as.character(Nutzungsbeschreibung),
+                     vers_summe = as.numeric(Schaetzwert),
+                     koord_nord = as.character(KoordinateNord),
+                     koord_ost = as.character(KoordinateOrd)
+) %>% 
+  # filter nach Datum
+  filter (schad_datum %within% inter_dat,
+          schad_art %in% c("Elementar"),
+          schad_code == 3) %>%
+  dplyr::select(gebnr_int:koord_ost)
+
+summary(df)
+```
+
+#### TEILAUSZAHLUNGEN
+Doppelte Schaden ID's nur einmal beruecksichtigen!
+Welche schaden ID sind doppelt vorhanden?
+
+```{r}
+df_duplicates <- df %>%
+  group_by(schad_nr) %>%
+  filter(n() > 1) %>%
+  ## duplikate nur einmal anzeigen
+  filter(row_number() == 1)
+
+## doppelte schaden ID Zeilen nur einmal
+df <- df %>%
+  ## duplikate nur einmal
+  distinct(schad_nr, .keep_all = TRUE)
+```
+
+### Schadeninfo
+Schadensumme indexieren.
+Variable Schadenzahlung 1 wenn schad_geschaetzt > 0 und 0 wenn schad_geschaetzt = 0.
+Schadeninfo als Variablen in binärer Form, die angeben ob der Schaden sehr schwerwiegend war:
+- Schadengrad über (1) oder unter (0) Median
+- Schadengrad in (1) Top 20% oder nicht (0)
+- Schadengrad in (1) Top 10% oder nicht (0)
+- Schadengrad in (1) Top 5% oder nicht (0)
+
+```{r}
+# GVZ Versicherungsindex einlesen
+vers_index <- 'I:/Climostatisticians/Data_Science/GVZ_Data/versicherungsindex_gvz.csv'
+
+gvz_index <- read.csv2(vers_index, stringsAsFactors = FALSE) %>%
+  mutate(jahr = as.integer(format(as.Date(Jahr,"%d.%m.%Y"), "%Y")),
+         index = as.integer(Versicherungsindex.GVZ)) %>%
+  dplyr::select(c(5, 6))
+
+df <- df %>% ## netto schaeden indexieren
+  left_join(gvz_index, by = c("schad_jahr" = "jahr")) %>%
+  mutate(schad_index = round(max(index) / index * schad_geschaetzt),
+         schadengrad = ifelse(vers_summe > 0, schad_index/vers_summe, 0))
+```
+
+*Schadeninfo* berechnen
+```{r}
+# Quantile für schadengrade über Null
+tbl_quantile <- quantile(df$schadengrad[which(df$schadengrad >0)], probs = c(0.5, 0.8, 0.9, 0.95))
+
+df <- df %>% mutate(
+  schad_zahlung = ifelse(schad_index == 0, 0, 1),
+  schadgrad_top_50 = ifelse(schadengrad >= tbl_quantile[1], 1, 0),
+  schadgrad_top_20 = ifelse(schadengrad >= tbl_quantile[2], 1, 0),
+  schadgrad_top_10 = ifelse(schadengrad >= tbl_quantile[3], 1, 0),
+  schadgrad_top_05 = ifelse(schadengrad >= tbl_quantile[4], 1, 0)
+)
+```
+
+#### Export als Excel-CSV
+DF aufbereiten...
+```{r}
+df_out <- df %>% 
+  # wenn keine Koordinaten, dann raus
+  filter(koord_nord > 0 & !is.na(koord_nord)) %>% 
+  dplyr::select(gvz_nummer = gebnr_int, schaden_datum = schad_datum, nutzungs_code = nutzungs_code,
+                nutzung = nutzung, # versicherungswert = vers_summe,
+                schadenzahlung = schad_zahlung,
+                schadgrad_top_50 = schadgrad_top_50, schadgrad_top_20 = schadgrad_top_20,
+                schadgrad_top_10 = schadgrad_top_10, schadgrad_top_05 = schadgrad_top_05,
+                koord_nord = koord_nord, koord_ost = koord_ost)
+
+summary(df_out)
+```
+
+...Excel-CSV schreiben
+```{r}
+# csv file schreiben
+name_str <- paste0("ueberschwemmungsschaeden_gvz_2006_bis_2019.csv")
+# write_excel_csv(df_out, name_str, delim = ";")
+```
+
+**Nachtrag**
+Zusätzlich sollen Gebäudenummer der GVZ mit den Hochwassergefährdungs Infos verknüpft werden. Die Liste mit den Gebäudenummern hat die UniBasel der GVZ geschickt: HP_GVZ
+```{r}
+pth_dat <- "I:/Climate_Analytics/Data_Science/Data_Processing/FloodData_UniBasel/"
+
+input_csv <- paste0(pth_dat, "GVZ_Nr_UniBasel_Neu.csv")
+
+## Alle Datenpunkte der UniBasel
+dat_uniBasel <- read_delim(input_csv, delim = ";",
+                  locale = locale(encoding = 'UTF-8'),
+                  # locale = locale(encoding = 'ISO-8859-1'),
+                  col_names = TRUE,
+                  col_types = cols_only(
+                    gvznr = col_integer()))
+
+input_csv <- "I:/Climate_Analytics/Data_Science/GVZ_Data/2019/gebaeudebestand_20190221 mit hw gefaehrdung.csv"
+
+dat_gvz_hw <- read_delim(input_csv, delim = ",",
+                  locale = locale(encoding = 'UTF-8'),
+                  # locale = locale(encoding = 'ISO-8859-1'),
+                  col_names = TRUE,
+                  col_types = cols_only(
+                    GebNr  = col_character(),
+                    Zweck = col_integer(),
+                    gefst_max = col_double(),
+                    ft30_max = col_double(),
+                    int30_max = col_double(),
+                    ft100_max = col_double(),
+                    int100_max = col_double(),
+                    ft300_max = col_double(),
+                    int300_max = col_double(),
+                    gefst_max = col_double()
+                  )
+) %>%
+  ## Gebnr ohne Bindestrich und zu integer
+  mutate(GebNr = as.integer(gsub("-", "", GebNr)))
+
+## Datenpunkte der UniBasel mit den GVZ Daten ergänzen
+df_unibasel_gvz <- dat_uniBasel %>%
+  left_join(dat_gvz_hw, by = c("gvznr" = "GebNr"))%>%
+  rename(Nutzungscode = Zweck,
+         TIEFE_30 = ft30_max,
+         INT_30 = int30_max,
+         TIEFE_100 = ft100_max,
+         INT_100 = int100_max,
+         TIEFE_300 = ft300_max,
+         INT_300 = int300_max,
+         GEFSTUFE_HW = gefst_max)
+
+# csv file schreiben
+name_str <- paste0("UniBasel_GVZ_Ueberschwemmungsgefaehrdung.csv")
+# write_excel_csv(df_unibasel_gvz, name_str, delim = ";")
+```
+

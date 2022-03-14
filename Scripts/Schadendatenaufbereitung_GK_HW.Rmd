@@ -1,0 +1,140 @@
+---
+title: "Datenlieferung GVZ für die Hochwassergefahrenkartierung"
+subtitle: ""
+author: "Mirco Heidemann, GVZ Gebäudeversicherung Kanton Zürich"
+date: "01/2020"
+output:
+  pdf_document: default
+---
+Für die Schadeninformation von Überschwemmung und Erdrutsch/Steinschlag je ein CSV exportieren.
+Die Daten gehen an Christian Schuler vom AWEL. Voraussetzung ist eine Datenbezugs- und Nutzungsvereinbarung
+
+#### Gemeinde wählen
+z.B:
+- Oetwil an der Limmat
+- Geroldswil
+- Dietikon
+- Schlieren
+- Weiningen
+- Unterengstringen
+- Oberengstringen
+```{r}
+kartierungsgebiet <- 'Zürich'
+t_gem <- c('Zürich')
+```
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+
+## relative pfade
+pth_dat <- ("../../Datadrop/")
+
+## turn off scientific notation
+options(scipen=999)
+```
+
+#### Import aller im GemDat eingetragenen Schäden
+Anmerkung: Für die Datenlieferung im Januar 2020 werden die Daten aus dem SQL-Schadendaten Export mit Stand 19.12.2019 verwendet.
+```{r}
+input_csv <- paste0(pth_dat, "SQL_Schaden_20200120.csv")
+
+dat <- read_delim(input_csv, delim = ";",
+           #locale = locale(encoding = 'ISO-8859-1'),
+           locale = locale(encoding = 'UTF-8'),
+           col_names = TRUE,
+           col_types = cols_only(
+             Gemeinde_Nr = col_character(),
+             GebaeudeSuchbegriff = col_character(),
+             SchadenNr = col_character(),
+             SchadenDatum = col_date("%d.%m.%Y"),
+             SchadenUrsache = col_character(),
+             SchadenUrsacheCode = col_character(),
+             HausNr = col_character(),
+             PLZ = col_integer(),
+             Ort = col_character(),
+             KoordinateOrd = col_character(),
+             KoordinateNord = col_character(),
+             GemeindeName = col_character(),
+             SchadenSumme = col_number()
+           ))
+```
+
+#### TEILAUSZAHLUNGEN
+Doppelte Schaden ID's nur einmal beruecksichtigen!
+Welche schaden ID sind doppelt vorhanden?
+```{r}
+df_duplicates <- dat %>%
+  group_by(SchadenNr) %>%
+  filter(n() > 1) %>%
+  ## duplikate nur einmal anzeigen
+  filter(row_number() == 1)
+
+## doppelte schaden ID Zeilen nur einmal
+df <- dat %>%
+  ## duplikate nur einmal
+  distinct(SchadenNr, .keep_all = TRUE)
+```
+
+#### Umbenennen der Variablen gemäss der Datenliederung und filtern nach den relevanten Schäden
+- gewählte Gemeinden
+- 3 Hochwasser, Überschwemmung
+- 4 Erdrutsch, Steinschlag
+```{r}
+df <- df %>% mutate(
+  GemeindNr = as.character(Gemeinde_Nr),
+  GebNr = as.character(GebaeudeSuchbegriff),
+  SchadenNr_Neu = as.character(SchadenNr),
+  Schadendatum = as.Date(SchadenDatum,"%d.%m.%Y"),
+  Ursache = as.character(SchadenUrsache),
+  Ursache_Code = as.character(SchadenUrsacheCode),
+  HausNr_Neu = as.character(HausNr),
+  Plz = as.integer(PLZ),
+  Ort_Neu = as.character(Ort),
+  Ekoord_lv95 = as.character(KoordinateOrd),
+  Nkoord_lv95 = as.character(KoordinateNord),
+  Gemeinde = as.character(GemeindeName),
+  schadsum = as.double(SchadenSumme)) %>% 
+  # filter nach Gemeinde, Schadenursache und Schäden ab 1983
+  filter (format(Schadendatum, "%Y") > 1982,
+          SchadenUrsacheCode %in% c("3", "4"),
+          !is.na(Ekoord_lv95),
+          Ekoord_lv95 > 0,
+          # Gemeinde Zürich oder Winterthur:
+          grepl('Zürich', Gemeinde)) %>% 
+          # Für alle anderen Gemeinden
+          # Gemeinde %in% t_gem) %>% 
+  dplyr::select(c(GemeindNr:schadsum)) %>% 
+  rename(SchadenNr = SchadenNr_Neu,
+         HausNr = HausNr_Neu,
+         Ort = Ort_Neu)
+```
+
+#### Schadeninfo aufbereiten
+Überschwemmung:
+1: Die GVZ hat einen Ueberschwemmungsschaden verguetet.
+0: Der GVZ wurde ein Ueberschwemmungsschaden gemeldet, welcher nicht zu einer Auszahlung gefuehrt hat, z.B. unter Selbstbehalt 500 CHF oder nicht versicherte Ursache (Rueckstau, Grundwasser, etc.)
+
+Erdrutsch/Steinschlag:
+1: Die GVZ hat einen Erdrusch/Steinschlag Schaden vergütet.
+```{r}
+# Überschwemmungsschäden
+df_ue <- df %>% 
+  filter(Ursache_Code == 3) %>% 
+  mutate(UES = ifelse(schadsum != 0, 1, 0)) %>% 
+  dplyr::select(-c(schadsum, Ursache_Code))
+
+# Erdrutsch- und Steinschlagschäden
+df_er <- df %>% 
+  filter(Ursache_Code == 4) %>% 
+  mutate(ER = ifelse(schadsum != 0, 1, 0)) %>% 
+  filter(schadsum != 0) %>% 
+  dplyr::select(-c(schadsum, Ursache_Code))
+```
+
+#### Für die Schadeninformation von Überschwemmung und Erdrutsch/Steinschlag je ein CSV exportieren.
+```{r}
+write_excel_csv2(df_ue, paste0('Datenlieferung_GVZ_', kartierungsgebiet, '_UES.csv'))
+write_excel_csv2(df_er, paste0('Datenlieferung_GVZ_', kartierungsgebiet, '_ER.csv'))
+```

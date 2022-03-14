@@ -1,0 +1,158 @@
+---
+title: "Schadenzusammenstellung für VKF-Schadenstatistik"
+subtitle: "Letzten drei Jahre für die doppelte Schadenstatistik"
+author: "Mirco Heidemann"
+date: "04/2019"
+output:
+  pdf_document: default
+---
+
+Jedes Jahr erfasst der IRV die Schadenmeldungen der 18 KGV aus den Vorjahren in
+der VKF-Schadenstatistik zusammen. Für die doppelte Schadenstatistik liefert die GVZ Elementar- und Feuerschadendaten der letzten drei Jahre.
+
+Die Daten gehen an Markus Imhof vom IRV, Email: markus.imhof@irv.ch
+
+#### Notes:
+- Schadenmeldungen, d.h. alle Status
+- Per Ereignisdatum (Schadendatum)
+- GESCHAETZTE SCHADENSUMME VERWENDEN (NICHT DIE AUSBEZAHLTE!!)
+
+**Vorbereitung der Daten:**
+- Export aus GemDat/Rubin: Objektschäden --> Auswertung Objektschäden: Schadendatum und Erfassungsdatum (gleich wie Schadendatum) eingeben
+- Sonderzeichen im Header ersetzen
+- Leerschläge, Bindestriche, Punkte im Header mit underline ersetzten respektive löschen
+- Evtl. leere Spalte (W?) löschen
+- Titel und Beschreibungszeilen löschen
+- Als CSV UFT-8 speichern
+
+### Die letzten drei Schadenjahre angeben
+```{r}
+## letzten drei Schadenjahre:
+jahr <- c(2019, 2020, 2021)
+```
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+
+## relative pfade
+pth_port <- ("Data/")
+
+## turn off scientific notation
+options(scipen=999)
+```
+
+#### Import aller Schäden bis Ende letzten Jahres
+```{r}
+input_csv <- paste0(pth_port, "Objektschaeden_2019_2021.csv")
+
+dat <- read_delim(input_csv, delim = ";",
+           #locale = locale(encoding = 'ISO-8859-1'),
+           locale = locale(encoding = 'UTF-8'),
+           col_names = TRUE,
+           col_types = cols_only(
+             Objektschadennummer = col_character(),
+             GVZ_BFS_Nr_ = col_integer(),
+             Schadendatum = col_date("%d.%m.%Y"),
+             Schadennummer = col_character(),
+             Gebaeudezweck = col_character(),
+             Schadenart = col_character(),
+             Ursachedetail = col_character(),
+             Schadensumme_CHF = col_number(),
+             Versicherungssumme_CHF = col_number()
+           ))
+summary(dat)
+```
+Leere Versicherungssumme: Warum??
+--> Abgebrochene Gebäude
+
+#### Umbennen der Variablen und filtern nach Elementar- und Feuerschäden sowie nach den letzten drei Jahren
+```{r}
+df <- dat %>% mutate(schad_id = as.character(Objektschadennummer),
+                     gemeinde_nr = as.integer(GVZ_BFS_Nr_),
+                     schad_datum = as.Date(Schadendatum,"%d.%m.%Y"),
+                     schad_jahr = as.integer(format(Schadendatum, "%Y")),
+                     schad_nr =  as.character(Schadennummer),
+                     zweckcode_vkf = as.integer(str_sub(str_extract(Gebaeudezweck,
+                                                                    "[[:digit:]]+"), 1, 2)),
+                     schad_art = as.character(Schadenart),
+                     schad_code = as.integer(str_extract(Ursachedetail, "[[:digit:]]+")),
+                     schad_ursache = as.character(str_trim(gsub("\\d", "", Ursachedetail),
+                                                           "left")),
+                     schad_geschaetzt = round(as.numeric(Schadensumme_CHF)),
+                     vers_summe = as.numeric(Versicherungssumme_CHF)) %>% 
+  # filter nach den letzten drei jahren, nur elementar- und feuerschäden
+  filter (schad_jahr %in% jahr,
+          schad_art %in% c("Elementar", "Feuer")) %>%
+  dplyr::select(schad_id:vers_summe)
+```
+
+#### Doppelte Schadenerfassung in GemDat/Rubin Objektschaden-Nr
+In GemDat/Rubin wird neben der Schaden-Nr neu eine Objektschaden-Nr geführt. Zu einer Schaden-Nr in Rubin können mehrere Objekte gehören.
+Beispiel:
+Zur Schaden-Nr 20-3-03009 ist ein Schaden am Wohnhaus (Objektschaden-Nr 20-3-03009-1) und ein Schaden am Garagengebäude (Objektschaden-Nr 20-3-03009-2) erfasst.
+
+Doppelte Schaden-Nr sind somit in Ordnung,  Objektschaden-Nr hingegen sollten nur einmal aufgeführt sein.
+
+Teilauszahlungen und doppelte Schaden-Nr sind in Rubin offenbar kein Thema mehr.
+
+```{r}
+df_duplicates <- df %>%
+  group_by(schad_id) %>%
+  filter(n() > 1) %>%
+  ## duplikate nur einmal anzeigen
+  filter(row_number() == 1)
+
+## doppelte schaden ID Zeilen nur einmal
+df <- df %>%
+  ## duplikate nur einmal
+  distinct(schad_id, .keep_all = TRUE)
+```
+
+#### Zusammenfassung der Feuer- und Elementarschäden pro Jahr
+```{r}
+tbl <- df %>% group_by(schad_art, schad_jahr) %>%
+  summarise(schadensumme = sum(schad_geschaetzt, na.rm = TRUE),
+            anzahl = n(),
+            anzahl_verguetet = length(schad_geschaetzt[schad_geschaetzt > 0])) %>% 
+  arrange(schad_jahr)
+
+# tbl output
+knitr::kable(tbl,
+             format.args = list(big.mark = "'"),
+             caption = paste('Zusammenfassung der Schadenmeldungen für', min(jahr), "bis", max(jahr)))%>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+#### Output: Pro Jahr die Feuer- und Elementarschäden in ein separates csv exportieren
+```{r}
+## Feuer
+df_fs <- df %>% 
+  filter(schad_art == "Feuer") %>% 
+  select(gemeinde_nr = gemeinde_nr, schaden_datum = schad_datum, schad_jahr,
+         schaden_nr = schad_nr, zweckcode_vkf = zweckcode_vkf,
+         schadencode_gvz = schad_code, schadenursache = schad_ursache,
+         schadensumme = schad_geschaetzt, vers_summe = vers_summe)
+
+# split df feuer by schadenjahr
+listDf_fs <- df_fs %>% split(.$schad_jahr)
+
+# export pro schadenjahr ein feuerschaden csv
+lapply(1:length(listDf_fs),  function (x) write_excel_csv2(listDf_fs[[x]], file = paste('tbl_feuerschaden_gvz_', names (listDf_fs[x]),'.csv', sep="")))
+
+## Elementar
+df_es <- df %>%
+  filter(schad_art == "Elementar") %>%
+  select(gemeinde_nr = gemeinde_nr, schaden_datum = schad_datum, schad_jahr,
+         schaden_nr = schad_nr, zweckcode_vkf = zweckcode_vkf,
+         schadencode_gvz = schad_code, schadenursache = schad_ursache,
+         schadensumme = schad_geschaetzt, vers_summe = vers_summe)
+
+# split df elementar by schadenjahr
+listDf_es <- df_es %>% split(.$schad_jahr)
+
+# export pro schadenjahr ein feuerschaden csv
+lapply(1:length(listDf_es),  function (x) write_excel_csv2(listDf_es[[x]], file = paste('tbl_elementarschaden_gvz_', names (listDf_es[x]),'.csv', sep="")))
+```
+

@@ -1,0 +1,109 @@
+---
+title: "Selektion eines Elementarereignisses aus GemDat/Rubin"
+subtitle: ""
+author: "Mirco Heidemann"
+date: "09/2020"
+#output:
+#  pdf_document: default
+---
+Aus GemDat/Rubin muss erst ein Excel exportiert werden.
+
+### Datum angeben
+Von - bis Datum angeben
+```{r}
+von_dat <- "01.07.2019"
+#bis_dat <- "28.05.2020"
+
+#inter_dat <- interval(dmy(von_dat), dmy(bis_dat))
+inter_dat <- interval(dmy(von_dat), dmy(von_dat) + 1)
+```
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+library(lubridate)
+
+## relative pfade
+pth_dat <- "I:/Datadrop/"
+
+## turn off scientific notation
+options(scipen=999)
+```
+
+#### Import aller Schäden gemäss GemDat/Rubin Export
+...
+```{r}
+
+## Rubin kompatibel
+input_csv <- paste0(pth_dat, "Rubin_Schaden_201605_202009.csv")
+
+dat <- read_delim(input_csv, delim = ";",
+           locale = locale(encoding = 'UTF-8'),
+           #locale = locale(encoding = 'ISO-8859-1'),
+           col_names = TRUE,
+           col_types = cols_only(
+             #SchadenId = col_integer(),
+             GVZ_BFS_Nr = col_integer(),
+             Schadendatum = col_date("%d.%m.%Y"),
+             Schadennummer = col_character(),
+             Gebaeudezweck = col_character(),
+             Schadenart = col_character(),
+             Ursachedetail = col_character(),
+             Gebaeudeschadenstatus = col_character(),
+             Schadensumme_CHF = col_number(),
+             Versicherungssumme_CHF = col_number()
+           ))
+```
+
+Umbennen der Variablen, filtern nach Elementar- und Feuerschäden sowie nach den Schadendaten im gewünschten Intervall.
+
+```{r}
+df <- dat %>% mutate(#schad_id = as.integer(SchadenId),
+                     gemeinde_nr = as.integer(GVZ_BFS_Nr),
+                     schad_datum = as.Date(Schadendatum,"%d.%m.%Y"),
+                     schad_jahr = as.integer(format(schad_datum, "%Y")),
+                     schad_nr =  as.character(Schadennummer),
+                     zweckcode_vkf = as.integer(str_sub(str_extract(Gebaeudezweck,
+                                                                    "[[:digit:]]+"), 1, 2)),
+                     schad_art = as.character(Schadenart),
+                     schad_code = as.integer(str_extract(Ursachedetail, "[[:digit:]]+")),
+                     schad_ursache = as.character(str_trim(gsub("\\d", "", Ursachedetail),
+                                                           "left")),
+                     schad_status = as.character(Gebaeudeschadenstatus),
+                     schad_geschaetzt = round(as.numeric(Schadensumme_CHF)),
+                     vers_summe = as.numeric(Versicherungssumme_CHF)) %>% 
+  
+  # filter nach Datum und gewünschter Anwendung:
+  filter (schad_datum %within% inter_dat,
+          #schad_art %in% c("Elementar", "Feuer")) %>%
+          schad_ursache %in% c("Hagel"),
+          schad_status %in% c("Erledigt", "Pendent"),
+          schad_geschaetzt > 0) %>%
+  dplyr::select(gemeinde_nr:vers_summe)
+```
+
+
+#### Statistische Kennzahlen des Schadenereignisses
+Schadenmittel, - median und - maximum berechnen.
+
+```{r}
+schad_anzahl <- dim(df)[1]
+schad_mean <- round(mean(df$schad_geschaetzt),0)
+schad_median <- round(median(df$schad_geschaetzt), 0)
+schad_max <- round(max(df$schad_geschaetzt), 0)
+
+# Join the variables to create a data frame
+df_tbl <- data.frame(schad_anzahl,schad_mean,schad_median,schad_max)
+# Name the data frame
+names(df_tbl) <- c('Anzahl', 'Mittelwert', 'Median', 'Maximum')
+
+# tbl output
+knitr::kable(df_tbl,
+             col.names = c('Anzahl', 'Mittelwert', 'Median', 'Maximum'),
+             align = c('r', 'r', 'r', 'r'),
+             format.args = list(big.mark = "'"),
+             caption = 'Statistik Schadenereignis')%>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+

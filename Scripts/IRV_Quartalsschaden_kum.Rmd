@@ -1,0 +1,192 @@
+---
+title: "Gesamt Schadenstand Feuer und Elementar pro Quartal"
+subtitle: "Kummuliert über die Quartale"
+author: "Mirco Heidemann"
+date: "10/2019"
+output:
+  pdf_document: default
+---
+
+Kummuliert über die Quartale:
+- Q1: Januar bis 31. März
+- Q2: Januar bis 30. Juni
+- Q3: Januar bis 30. September
+- Q4: Januar bis 31. Dezember
+
+Die Daten gehen an Ewa Kozlowski vom IRV, Email: ewa.kozlowski@kgv.ch
+
+#### Notes:
+- Per Ereignisdatum (Schadendatum)
+- GESCHAETZTE SCHADENSUMME VERWENDEN (NICHT DIE AUSBEZAHLTE!!)
+
+**Daten aus Rubin exportieren:**
+- Geschäftskontrolle --> Objektschäden --> Nur Gebäudestatus "Pendent" und "Erledigt" auswählen --> Anzeigen --> Alle Spalten -- > Kopieren --> In Excel einfügen
+- Nur Über Ericom: Kontrollieren, ob die letzten Zeilen doppelt kopiert wurden
+- Sonderzeichen in Spaltennamen entfernen: "-", " ", "ä", "ü", "ö" und leere Spalten löschen
+
+### Quartal angeben
+Von - bis Datum angeben
+```{r}
+von_dat <- "01.01.2021"
+bis_dat <- "30.09.2021"
+```
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+library(lubridate)
+
+## relative pfade
+pth_dat <- "I:/Datadrop/"
+
+## turn off scientific notation
+options(scipen=999)
+```
+
+#### Import aller Schäden bis Ende letzten Jahres
+Ab Januar 2020 GemDat/Rubin kompatibel...
+
+Beachte die Formatierung .xls/.csv Formatierung. Immer das Summary der importierten Daten anschauen!
+
+```{r}
+## --- Alt: GemDat 5
+
+# input_csv <- paste0(pth_dat, "schaden_q3_2021.csv")
+# 
+# dat <- read_delim(input_csv, delim = ";",
+#            #locale = locale(encoding = 'UTF-8'),
+#            locale = locale(encoding = 'ISO-8859-1'),
+#            col_names = TRUE,
+#            col_types = cols_only(
+#              SchadenId = col_integer(),
+#              Ausdr1 = col_integer(),
+#              SchadenDatum = col_date("%d.%m.%Y"),
+#              SchadenNr = col_character(),
+#              GebaeudeZweckText = col_character(),
+#              SchadenArtBezeichnung = col_character(),
+#              CodTextDt = col_character(),
+#              SchadenSumme = col_number(),
+#              SchadenVersicherungWert = col_number()
+#            ))
+
+
+## ---GemDat/Rubin
+
+input_csv <- paste0(pth_dat, "Objektschaeden_2021_Q1_Q3.csv")
+
+dat <- read_delim(input_csv, delim = ";",
+           locale = locale(encoding = 'UTF-8',
+                           decimal_mark = ".",
+                           grouping_mark = "'"),
+           col_names = TRUE,
+           skip_empty_rows = TRUE,
+           na = c("", "NA"),
+           col_types = cols_only(
+             Objektschadennummer = col_character(),
+             BFS_Nummer = col_integer(),
+             Schadendatum = col_date("%d.%m.%Y"),
+             Schadennummer = col_character(),
+             Gebaeudezweck = col_character(),
+             Schadenart = col_character(),
+             Gebaeudeschadenstatus = col_character(),
+             Ursache = col_character(),
+             Schadensumme = col_number(),
+             # Wie sind die Felder im File formatiert?
+             Versicherungssumme_CHF = col_number()
+           ))
+
+summary(dat)
+```
+
+#### Cleaning up...
+- Schadensumme kleiner als 0?
+- NA's in Versicherungssumme?
+- usw.
+
+```{r}
+df <- dat %>%
+  filter(!is.na(Versicherungssumme_CHF),
+         Gebaeudeschadenstatus %in% c("Pendent", "Erledigt")) %>%
+  mutate(Schadensumme = as.numeric(abs(Schadensumme))) %>%
+  dplyr::select(-Gebaeudeschadenstatus)
+
+summary(df)
+```
+
+Umbennen der Variablen, filtern nach Elementar- und Feuerschäden sowie nach den Schadendaten im gewünschten Intervall.
+
+```{r}
+inter_dat <- interval(dmy(von_dat), dmy(bis_dat))
+
+df <- df %>% mutate(objektschad_id = as.character(Objektschadennummer),
+                     gemeinde_nr = as.integer(BFS_Nummer),
+                     schad_datum = as.Date(Schadendatum,"%d.%m.%Y"),
+                     schad_jahr = as.integer(format(schad_datum, "%Y")),
+                     schad_nr =  as.character(Schadennummer),
+                     zweckcode_vkf = as.integer(str_sub(str_extract(Gebaeudezweck,
+                                                                    "[[:digit:]]+"), 1, 2)),
+                     schad_art = as.character(Schadenart),
+                     schad_code = as.integer(str_extract(Ursache, "[[:digit:]]+")),
+                     schad_ursache = as.character(str_trim(gsub("\\d", "", Ursache),
+                                                           "left")),
+                     schad_geschaetzt = round(as.numeric(Schadensumme)),
+                     vers_summe = as.numeric(Versicherungssumme_CHF)) %>% 
+  # filter nach Datum
+  filter (schad_datum %within% inter_dat,
+          schad_art %in% c("Elementar", "Feuer")) %>%
+  dplyr::select(objektschad_id:vers_summe)
+```
+
+#### Doppelte Schadenerfassung in GemDat/Rubin Objektschaden-Nr?
+In GemDat/Rubin wird neben der Schaden-Nr neu eine Objektschaden-Nr geführt. Zu einer Schaden-Nr in Rubin können mehrere Objekte gehören.
+Beispiel:
+Zur Schaden-Nr 20-3-03009 ist ein Schaden am Wohnhaus (Objektschaden-Nr 20-3-03009-1) und ein Schaden am Garagengebäude (Objektschaden-Nr 20-3-03009-2) erfasst.
+
+Doppelte Schaden-Nr sind somit in Ordnung,  Objektschaden-Nr hingegen sollten nur einmal aufgeführt sein.
+
+Teilauszahlungen und doppelte Schaden-Nr sind in Rubin offenbar kein Thema mehr.
+
+```{r}
+df_duplicates <- df %>%
+  group_by(objektschad_id) %>%
+  filter(n() > 1) %>%
+  ## duplikate nur einmal anzeigen
+  filter(row_number() == 1)
+
+## doppelte schaden ID Zeilen nur einmal
+df <- df %>%
+  ## duplikate nur einmal
+  distinct(objektschad_id, .keep_all = TRUE)
+```
+
+#### Export als Excel-CSV
+Feuer- und Elementarschäden je als csv File exportieren.
+
+```{r}
+out_df <- df %>% 
+  dplyr::select(gemeinde_nr = gemeinde_nr, schaden_datum = schad_datum, schaden_jahr = schad_jahr,
+                schaden_nr = schad_nr, zweckcode_vkf = zweckcode_vkf, schad_art = schad_art,
+                schadencode_gvz = schad_code, schadenursache = schad_ursache, schadensumme = schad_geschaetzt,
+                vers_summe = vers_summe) %>% 
+  filter(!is.na(schadencode_gvz))
+  
+## Feuer
+out_fs <- out_df %>% 
+  filter(schad_art == "Feuer") %>% 
+  dplyr::select(-schad_art)
+
+# csv file schreiben
+name_str_fs <- paste0("schadenstand_feuer_gvz_", as.Date(bis_dat, "%d.%m.%Y"), ".csv")
+write_excel_csv(out_fs, name_str_fs, delim = ";")
+
+## Elementar
+out_es <- out_df %>%
+  filter(schad_art == "Elementar") %>% 
+  dplyr::select(-schad_art)
+
+# csv file schreiben
+name_str_es <- paste0("schadenstand_elementar_gvz_", as.Date(bis_dat, "%d.%m.%Y"), ".csv")
+write_excel_csv(out_es, name_str_es, delim = ";")
+```
+
