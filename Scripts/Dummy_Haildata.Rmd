@@ -4,7 +4,7 @@ author: "Mirco Heidemann"
 date: "2/10/2022"
 output: pdf_document
 ---
-Creats dummy data for both, GVZ exposure and loss data from a historical hail event (2012/07/01).
+Creates dummy data for both, GVZ exposure and loss data from a historical hail event (2012/07/01).
 The data are used in the scClim-Project to setup the CLIMADA framework for hail modelling.
 
 ```{r setup, include=FALSE}
