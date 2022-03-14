@@ -1,0 +1,58 @@
+---
+title: "Remove Duplicates in Schadennummer"
+subtitle: "
+author: "Mirco Heidemann"
+date: "03/2022"
+output:
+  pdf_document: default
+---
+
+In GemDat/Rubin wird neben der Schaden-Nr neu eine Objektschaden-Nr geführt. Zu einer Schaden-Nr in Rubin können mehrere Objekte gehören. Solange aber die Objektschaden-Nr noch nicht in unserem Standard Report drin ist, müssen Schadennummer welche mehrfach aufgeführt sind - und jeweils die Gesamtschadensumme enthalten - entfernt werden.
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+
+## Setup paths
+path_data <- "../Data/"
+path_output <- "../Output/"
+```
+
+#### Import der Schäden aus Rubin
+```{r}
+input_csv <- paste0(path_data, "20220308_GemDat_Schaden_Export_Ng.csv")
+
+dat <- read_delim(input_csv, delim = ";")
+summary(dat)
+```
+
+#### Doppelte Schadenerfassung in GemDat/Rubin Objektschaden-Nr
+In GemDat/Rubin wird neben der Schaden-Nr neu eine Objektschaden-Nr geführt. Zu einer Schaden-Nr in Rubin können mehrere Objekte gehören.
+Beispiel:
+Zur Schaden-Nr 20-3-03009 ist ein Schaden am Wohnhaus (Objektschaden-Nr 20-3-03009-1) und ein Schaden am Garagengebäude (Objektschaden-Nr 20-3-03009-2) erfasst.
+
+Doppelte Schaden-Nr sind somit in Ordnung,  Objektschaden-Nr hingegen sollten nur einmal aufgeführt sein.
+
+Teilauszahlungen und doppelte Schaden-Nr sind in Rubin offenbar kein Thema mehr.
+
+```{r}
+df_duplicates <- dat %>%
+  group_by(ClaimNumber) %>%
+  filter(n() > 1) %>%
+  ## duplikate nur einmal anzeigen
+  filter(row_number() == 1)
+
+## doppelte schaden ID Zeilen nur einmal
+df <- dat %>%
+  ## duplikate nur einmal
+  distinct(ClaimNumber, .keep_all = TRUE)
+
+summary(df)
+```
+
+#### Output: Ein neues Schaden File, pro Schadennummer eine Zeile
+```{r}
+out_file <- str_replace(input_csv, ".csv", "_removed_duplicates.csv")
+write_excel_csv(df, out_file, delim = ";")
+```

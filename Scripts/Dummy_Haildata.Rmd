@@ -1,0 +1,201 @@
+---
+title: "Dummy Haildata"
+author: "Mirco Heidemann"
+date: "2/10/2022"
+output: pdf_document
+---
+Creats dummy data for both, GVZ exposure and loss data from a historical hail event (2012/07/01).
+The data are used in the scClim-Project to setup the CLIMADA framework for hail modelling.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## Setup paths
+path_data <- "../Data/"
+path_output <- "../Output/"
+
+library(tidyverse)
+```
+
+**Attribute for exposure data:**
+- VersicherungsID
+- Versicherungssumme
+- Volumen
+- Baujahr
+- Nutzung
+- Nutzungscode
+- KoordinateNord
+- KoordinateOst
+- Adresse
+
+**Attribute for loss data:**
+- VersicherungsID
+- Versicherungssumme
+- Volumen
+- Baujahr
+- Nutzung
+- Nutzungscode
+- KoordinateNord
+- KoordinateOst
+- Adresse
+
+- Schadennummer
+- Schadendatum
+- Schadensumme
+
+- Index
+
+Read exposure and loss into data frames.
+Read GVZ-Index for indexing losses and portfolio from 2019 for the coordinates.
+```{r}
+file_name_exp <- paste0(path_data, "Gebaeudewert_20220214_171402.csv")
+file_name_loss <- paste0(path_data, "20120701_GVZ_Loss.csv")
+index_gvz <- paste0(path_data, "Versicherungsindex_GVZ.csv")
+file_name_coords <- paste0(path_data, "2019_SQL_Portfolio.csv")
+
+# Read exposure data
+df_orig_exp <- read_delim(file_name_exp, delim = ";",
+                     col_select = c(10, 12,14,18,23,28))
+
+# Read 2019-Portfolio with coordinates for joining
+df_coors <- read_delim(file_name_coords, delim = ";",
+                     col_select = c(1,16:17))
+
+# Read loss data, reported from the hail event 2012/07/01
+df_orig_loss <- read_delim(file_name_loss, delim = ";",
+                           # locale = locale(grouping_mark = "'"),
+                           col_select = c(5,10,14,19,23)) %>% 
+  mutate(Schadensumme = as.numeric(str_replace_all(Schadensumme, "’", '')))
+
+# Read "GVZ Versicherungs Index"
+df_index <- read_delim(index_gvz, delim = ";",
+                       col_select = c(1,3)) %>% 
+  mutate(Jahr = format(as.Date(Jahr, "%d.%m.%Y"), "%Y")) %>% 
+  rename(Index = `Versicherungsindex GVZ`)
+```
+
+Data wrangling: Rename, re-shape, join gvz-index and coordinates, filter non-Na's, only hail losses, ...
+```{r}
+exp_names <- c("VersicherungsID", "Versicherungssumme", "Volumen", "Baujahr",
+               "Nutzung", "KoordinateNord", "KoordinateOst", "Adresse")
+loss_names <- c(exp_names, "Schadennummer", "Schadendatum", "Schadensumme", "Index")
+
+# Wrangling exposure data
+df_exp <- df_orig_exp %>% 
+  filter(!is.na(Nutzung)) %>%
+  rename(VersicherungsID = `kantonale Versicherungsnummer`,
+         Adresse = Gebäudeadresse,
+         Versicherungssumme = `Versicherungssumme *`,
+         Volumen = `Volumen *`) %>% 
+  left_join(df_coors, by = c("VersicherungsID" = "GebaeudeId")) %>% 
+  rename(KoordinateNord = ObvNrdKLok_Geb,
+         KoordinateOst = ObvOstKLok_Geb) %>% 
+  filter(!is.na(KoordinateNord)) %>% 
+  relocate(any_of(exp_names))
+
+# Wrangling loss data
+df_loss <- df_orig_loss %>% 
+  rename(VersicherungsID = `Kantonale Versicherungsnummer`,
+         Schadenursache = Ursache) %>%
+  mutate(Schadenjahr = format(as.Date(Schadendatum, "%d.%m.%Y"), "%Y")) %>% 
+  left_join(df_exp, by = "VersicherungsID") %>% 
+  left_join(df_index, by = c("Schadenjahr" = "Jahr")) %>% 
+  filter(Schadenursache == "211 Hagel",
+         !is.na(Versicherungssumme)) %>% 
+  dplyr::select(all_of(loss_names)) %>% 
+  relocate(any_of(loss_names))
+
+summary(df_exp)
+summary(df_loss)
+```
+
+Create dummy data for exposure.
+```{r}
+# Remove zeros
+df_exp_sample <- df_exp %>% 
+  filter(Versicherungssumme > 0,
+         Volumen > 0,
+         Baujahr > 0) %>% 
+  # Sample from real values, or from log-normal distribution for VerSum and Volumen
+  mutate(VersicherungsID_Sample = sample(VersicherungsID, length(VersicherungsID), replace = FALSE),
+         VersSum_Sample = round(rlnorm(n = length(Versicherungssumme),
+                                 meanlog = mean(log(Versicherungssumme)),
+                                 sdlog = sd(log(Versicherungssumme)))),
+         Volume_Sample = round(rlnorm(n = length(Volumen),
+                                 meanlog = mean(log(Volumen)),
+                                 sdlog = sd(log(Volumen)))),
+         Baujahr_Sample = sample(Baujahr, length(Baujahr), replace = TRUE),
+         # Sample Nutzung with description and code together
+         Nutzung_Sample = sample(Nutzung, length(Nutzung), replace = TRUE),
+         # Don't sample Koordinates and address
+         KoordinateNord_Sample = KoordinateNord,
+         KoordinateOst_Sample = KoordinateOst,
+         Adresse_Sample = Adresse,
+         ) %>% 
+  dplyr::select(VersicherungsID_Sample:Adresse_Sample) %>% 
+  rename_with(~ exp_names)
+```
+
+Create dummy data for hail losses from 2012/07/01.
+```{r}
+df_loss_sample <- df_loss %>%
+    filter(Versicherungssumme > 0,
+         Volumen > 0,
+         Baujahr > 0,
+         Schadensumme > 0) %>%
+    # Sample from real values, or from log-normal distribution for VerSum, Volumen and SchadSum
+  mutate(VersicherungsID_Sample = sample(VersicherungsID, length(VersicherungsID), replace = FALSE),
+         VersSum_Sample = round(rlnorm(n = length(Versicherungssumme),
+                                 meanlog = mean(log(Versicherungssumme)),
+                                 sdlog = sd(log(Versicherungssumme)))),
+         Volume_Sample = round(rlnorm(n = length(Volumen),
+                                 meanlog = mean(log(Volumen)),
+                                 sdlog = sd(log(Volumen)))),
+         Baujahr_Sample = sample(Baujahr, length(Baujahr), replace = TRUE),
+         # Sample Nutzung with description and code together
+         Nutzung_Sample = sample(Nutzung, length(Nutzung), replace = TRUE),
+         # Don't sample Koordinates and address
+         KoordinateNord_Sample = KoordinateNord,
+         KoordinateOst_Sample = KoordinateOst,
+         Adresse_Sample = Adresse,
+         Schadennummer_Sample = sample(Schadennummer, length(Schadennummer), replace = FALSE),
+         Schadendatum_Sample = Schadendatum,
+         Schadensumme_Sample = round(rlnorm(n = length(Schadensumme),
+                                      meanlog = mean(log(Schadensumme)),
+                                      sdlog = sd(log(Schadensumme)))),
+         Index_Sample = Index
+         ) %>% 
+  dplyr::select(VersicherungsID_Sample:Index_Sample) %>% 
+  rename_with(~ loss_names)
+```
+
+Separate Nutzung (description) and Nutzungscode and change columns order according to the data-template.
+Slice dummy data to 10'000 random rows of exposure and 2'000 random rows of loss.
+Write csv with dummy data to disk.
+```{r}
+exp_sample_names <- c("VersicherungsID", "Versicherungssumme", "Volumen", "Baujahr",
+               "Nutzung", "Nutzungscode", "KoordinateNord", "KoordinateOst", "Adresse")
+loss_sample_names <- c(exp_sample_names, "Schadennummer", "Schadendatum", "Schadensumme", "Index")
+
+df_exp_sample <- df_exp_sample %>%
+  # Split Nutzungscode and Nutzung
+  separate(Nutzung, c("Nutzungscode", "Nutzung"), sep = ",") %>%
+  mutate(Nutzungscode = as.integer(Nutzungscode),
+         Nutzung = str_trim(Nutzung)) %>%
+  # Change columns order according to the data-template
+  relocate(any_of(exp_sample_names)) %>% 
+  slice_sample(n = 10000)
+
+df_loss_sample <- df_loss_sample %>%
+  # Split Nutzungscode and Nutzung
+  separate(Nutzung, c("Nutzungscode", "Nutzung"), sep = ",") %>%
+  mutate(Nutzungscode = as.integer(Nutzungscode),
+         Nutzung = str_trim(Nutzung)) %>%
+  # Change columns order according to the data-template
+  relocate(any_of(loss_sample_names)) %>% 
+  slice_sample(n = 2000)
+
+write_excel_csv(df_exp_sample, paste0(path_output, "GVZ_Dummy_Exposure.csv"), delim = ";")
+write_excel_csv(df_loss_sample, paste0(path_output, "GVZ_Dummy_Hail_Loss_20220701.csv"), delim = ";")
+```
+

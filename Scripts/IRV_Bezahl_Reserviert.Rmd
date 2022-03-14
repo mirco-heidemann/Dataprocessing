@@ -1,0 +1,162 @@
+---
+title: "Schadenzusammenstellung für IRV"
+subtitle: "Bezahlte und reservierte Elementar- und Feuerschaeden im SCHADENjahr (seit 1982)"
+author: "Mirco Heidemann"
+date: "02/2019"
+output:
+  pdf_document: default
+---
+
+Die Daten werden für die IRV-Prämienberechnung verwendet.
+Daten Ewa Kozlowski vom IRV, Email: ewa.kozlowski@irv.ch
+
+#### Notes:
+- Geschaetzte Schaeden: Bis Mitte 2004 wurden im GemDat die Netto Summen als geschaetzte Schadensummen verbucht (Werte in GemDat ohne Selbestbehalt) danach die Brutto-Schadenschaetzung (Werte in GemDat inkl. Selbestbehalt)
+- Ab 2005:  Aufteilung nach bezahlten und reservierten Schäden
+- Bezahlte Schäden ab CHF 20'000 sind inklusive Verzinsung im GemDat erfasst.
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+
+## Setup paths
+path_data <- "../Data/"
+path_output <- "../Output/"
+
+# # Koordinaten werden gerundet angezeigt. Wenn das nicht erwünscht ist, wie folgt ändern:
+# options(digits = 10)
+```
+
+#### Import aller Schäden bis Ende letzten Jahres
+```{r}
+input_csv <- paste0(path_data, "schaden_201901.csv")
+
+dat <- read_delim(input_csv, delim = ";",
+           locale = locale(encoding = 'ISO-8859-1'),
+           col_names = TRUE,
+           col_types = cols_only(
+             GebaeudeId = col_character(),
+             GebaeudeSuchbegriff = col_character(),
+             SchadenId = col_integer(),
+             SchadenNr = col_character(),
+             SchadenDatum = col_date("%d.%m.%Y"),
+             SchadenSumme = col_number(),
+             FkoVersDa = col_date("%d.%m.%Y"),
+             FkoZaTot = col_number(),
+             SchadenArtBezeichnung = col_character(),
+             CodTextDt = col_character(),
+             SbwVerWert = col_number(),
+             GebaeudeZweckText = col_character(),
+             T_Tab_Jse_1_StcTextDt = col_character()
+           ))
+
+```
+
+Umbennen der Variablen
+```{r}
+df <- dat %>% rename(geb_id = GebaeudeId,
+                     geb_nr = GebaeudeSuchbegriff,
+                     schad_id = SchadenId,
+                     schad_nr =  SchadenNr,
+                     schad_datum = SchadenDatum,
+                     schad_geschaetzt = SchadenSumme,
+                     bezahlt_datum = FkoVersDa,
+                     schad_bezahlt = FkoZaTot,
+                     schad_art = SchadenArtBezeichnung,
+                     schad_code = CodTextDt,
+                     vers_summe = SbwVerWert,
+                     zwk_code_text = GebaeudeZweckText,
+                     status = T_Tab_Jse_1_StcTextDt)
+```
+
+#### TEILAUSZAHLUNGEN
+Die ausbezahlte summe muss zu einem total zusammengezählt werden, die dazugehörige geschätzte schadensumme ist jedesmal wieder aufgefürt, darf aber nur einmal gezählt werden.
+```{r}
+# Alle doppelten werte: teilauszahlungen
+tmp_teilZahl <- df %>%
+  filter(schad_id %in% unique(.[["schad_id"]][duplicated(.[["schad_id"]])]))
+
+# nur ein duplikat, nur die letzte auszahlung
+tmp <- df %>% filter(duplicated(.[["schad_id"]]))
+
+## summieren der teilauszahlungen zu einer gesamtsumme ...
+tmp <- df %>% group_by(schad_id) %>%
+  summarise(schad_bezahlt_tot = sum(schad_bezahlt))
+
+## df mit summierten teilauszahlungen und mit reservierten schaeden ergaenzen
+df <- left_join(df, tmp, by = 'schad_id') %>% # join der daten, inkl. den duplikaten
+  distinct(schad_id, .keep_all = TRUE) %>%   ## remove duplicates
+  select(-schad_bezahlt) %>% 
+  ## Reservierte Schaeden: geschaetzte Schadensumme, keine Auszahlung
+  mutate(schad_reserviert = ifelse(is.na(schad_bezahlt_tot), schad_geschaetzt, 0),
+         schad_bezahlt_tot = ifelse(is.na(schad_bezahlt_tot), 0, schad_bezahlt_tot),
+         ## Geschaetzte Schaeden
+         schad_geschaetzt = ifelse(schad_datum > as.Date('30.06.2004', "%d.%m.%Y"),
+                              schad_geschaetzt - 500, schad_geschaetzt),
+         schad_geschaetzt = ifelse(schad_geschaetzt < 0, 0, schad_geschaetzt))
+
+rm(tmp)
+```
+
+#### Schadenjahr Feuerschaeden
+```{r}
+df_feuer <- df %>% filter(schad_art == "Feuer") %>% 
+  group_by(schad_jahr = format(schad_datum, "%Y")) %>%
+  summarise(schad_geschaetzt_tot = sum(schad_geschaetzt),
+            schad_bezahlt_tot = sum(schad_bezahlt_tot),
+            schad_reserviert_tot= sum(schad_reserviert)) %>% 
+  # mutate(schad_jahr = as.integer(schad_jahr)) %>% 
+  ## fuer Schadenjahre bis 2004, nur geschaetzte Schadensumme
+  mutate(schad_reserviert_tot = round(ifelse(schad_jahr < 2005, 0,
+                                       schad_reserviert_tot), 0),
+         schad_bezahlt_tot = round(ifelse(schad_jahr < 2005, 0,
+                                      schad_bezahlt_tot), 0),
+         schad_geschaetzt_tot = round(ifelse(schad_jahr > 2004, 0,
+                                       schad_geschaetzt_tot), 0)) %>% 
+  ## ohne das aktuelle schadenjahr, erst ab 1982
+  filter(!(schad_jahr < 1982 | schad_jahr == as.numeric(format(Sys.Date(), "%Y"))))
+
+# tbl output
+knitr::kable(df_feuer,
+             col.names = c('Jahr', 'Geschätzt', 'Bezahlt', 'Reserviert'),
+             align = c('l', 'r', 'r', 'r'),
+             format.args = list(big.mark = "'"),
+             caption = 'Schadenjahr Feuerschäden')%>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+#### Schadenjahr Elementarschäden
+```{r}
+df_element <- df %>%
+  filter(schad_art == "Elementar") %>% 
+  group_by(schad_jahr = format(schad_datum, "%Y")) %>%
+  summarise(schad_geschaetzt_tot = sum(schad_geschaetzt),
+            schad_bezahlt_tot = sum(schad_bezahlt_tot),
+            schad_reserviert_tot= sum(schad_reserviert)) %>% 
+  # mutate(schad_jahr = as.integer(schad_jahr)) %>% 
+  ## fuer Schadenjahre bis 2004, nur geschaetzte Schadensumme
+  mutate(schad_reserviert_tot = round(ifelse(schad_jahr < 2005, 0,
+                                 schad_reserviert_tot), 0),
+         schad_bezahlt_tot = round(ifelse(schad_jahr < 2005, 0,
+                                schad_bezahlt_tot), 0),
+         schad_geschaetzt_tot = round(ifelse(schad_jahr > 2004, 0,
+                                 schad_geschaetzt_tot), 0)) %>% 
+  ## ohne das aktuelle schadenjahr, erst ab 1982
+  filter(!(schad_jahr < 1982 | schad_jahr == as.numeric(format(Sys.Date(), "%Y"))))
+
+# tbl output
+knitr::kable(df_element,
+             col.names = c('Jahr', 'Geschätzt', 'Bezahlt', 'Reserviert'),
+             align = c('l', 'r', 'r', 'r'),
+             format.args = list(big.mark = "'"),
+             caption = 'Schadenjahr Elementarschäden')%>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+#### Export der CSV Files
+```{r}
+write_excel_csv2(df_feuer, paste0(path_output, "jahresschad_feuer_2018.csv"))
+write_excel_csv2(df_element, paste0(path_output, "jahresschad_elementar_2018.csv"))
+```
+

@@ -1,0 +1,195 @@
+---
+title: "Aufbereitung der Schäden für das WSL"
+subtitle: "Schadenjahr 2021 - pro Gemeinde im Kanton Zürich"
+author: "Mirco Heidemann"
+date: "12/2021"
+output:
+  pdf_document: default
+---
+
+Im Auftrag der Abteilung Gefahrenprävention des Bundesamtes für Umwelt BAFU erfasst die Eidg. Forschungsanstalt WSL seit 1972 die Schäden, welche durch Hochwasser, Murgänge, Rutschungen und Sturzereignisse entstehen. Dazu werden auch monetäre Schätzungen gemäss Richtwerten gemacht. Die Datengrundlage dazu bilden hauptsächlich Printmedien. 
+Die wichtigsten Informationen welche für ein Ereignis erfasst werden sind Ort/Gemeinde, Datum, Schadensprozess und Schadensumme. 
+
+In schadenreichen Jahren wie 2021 vermögen die Printmedien die Ereignisse nicht abzudecken. Die räumliche Ausdehnung und die zeitlich nah aufeinander folgenden Ereignisse können von den Medien meist nur bruchstückhaft erfasst werden. 
+Deshalb sind wir zusätzlich auf Daten der Gebäudeversicherungen angewiesen. Wir richten uns deshalb an Sie und möchten Sie bitten, uns mit Ihren Daten zu unterstützen. 
+
+Dabei sind wir hauptsächlich an den Unwetterereignissen im Juni, Juli und August interessiert. Können Sie uns Daten zu diesen Ereignissen liefern?
+Falls irgendwie möglich, hätten wir gerne:
+- Schadensummen
+- Anzahl Schadenfällen
+pro Gemeinde, aufgeschlüsselt nach Prozess (Hochwasser, Rutschung, Murgang, Steinschlag, Hagel usw.) und Ereignis (Schadendatum). 
+
+Die Daten gehen an Frau Käthi Liechti vom WSL, Email: kaethi.liechti@wsl.ch
+
+#### Notes:
+- Schäden mit Status "pendent" oder "erledigt"
+
+**Vorbereitung der Daten:**
+- Export aus GemDat/Rubin: Objektschäden --> Auswertung Objektschäden --> Daten eingeben
+- Sonderzeichen ersetzen, Leerschläge, Bindestriche, Punkte mit underline ersetzten respektive löschen
+- Als CSV UFT-8 speichern
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+library(lubridate)
+
+## Setup paths
+path_data <- "../Data/"
+path_output <- "../Output/"
+
+## turn off scientific notation
+options(scipen=999)
+```
+
+#### Import aller Schäden bis Ende letzten Jahres
+```{r}
+input_csv <- paste0(path_data, "Rubin_Objektschaeden_2021_per_20211215.csv")
+
+dat <- read_delim(input_csv, delim = ";",
+           #locale = locale(encoding = 'ISO-8859-1'),
+           locale = locale(encoding = 'UTF-8'),
+           col_names = TRUE,
+           col_types = cols_only(
+             Objektschadennummer = col_character(),
+             Schadennummer = col_character(),
+             Schadendatum = col_date("%d.%m.%Y"),
+             Schadenart = col_character(),
+             Ursache = col_character(),
+             Gemeinde = col_character(),
+             BFS_Nummer = col_integer(),
+             Schadensumme = col_number()
+           ))
+summary(dat)
+```
+
+#### Umbennen der Variablen und filtern nach Elementar- und Feuerschäden sowie nach den letzten drei Jahren
+```{r}
+df <- dat %>% mutate(schad_id = as.character(Objektschadennummer),
+                     schad_nr =  as.character(Schadennummer),
+                     schad_datum = as.Date(Schadendatum,"%d.%m.%Y"),
+                     schad_art = as.character(Schadenart),
+                     schad_code = as.integer(str_extract(Ursache, "[[:digit:]]+")),
+                     schad_ursache = as.character(str_trim(gsub("\\d", "", Ursache),
+                                                           "left")),
+                     schad_geschaetzt = round(as.numeric(Schadensumme)),
+                     bfs_nr = as.integer(BFS_Nummer),
+                     gemeinde = Gemeinde) %>% 
+  # filter nach den letzten drei jahren, nur elementar- und feuerschäden
+  filter (schad_art %in% c("Elementar")) %>%
+  dplyr::select(schad_id:gemeinde)
+```
+
+#### Doppelte Schadenerfassung in GemDat/Rubin Objektschaden-Nr
+In GemDat/Rubin wird neben der Schaden-Nr neu eine Objektschaden-Nr geführt. Zu einer Schaden-Nr in Rubin können mehrere Objekte gehören.
+Beispiel:
+Zur Schaden-Nr 20-3-03009 ist ein Schaden am Wohnhaus (Objektschaden-Nr 20-3-03009-1) und ein Schaden am Garagengebäude (Objektschaden-Nr 20-3-03009-2) erfasst.
+
+Doppelte Schaden-Nr sind somit in Ordnung,  Objektschaden-Nr hingegen sollten nur einmal aufgeführt sein.
+
+Teilauszahlungen und doppelte Schaden-Nr sind in Rubin offenbar kein Thema mehr.
+
+```{r}
+df_duplicates <- df %>%
+  group_by(schad_id) %>%
+  filter(n() > 1) %>%
+  ## duplikate nur einmal anzeigen
+  filter(row_number() == 1)
+
+## doppelte schaden ID Zeilen nur einmal
+df <- df %>%
+  ## duplikate nur einmal
+  distinct(schad_id, .keep_all = TRUE)
+```
+
+#### Zusammenfassung der Elementarschäden (Anzahl Schadenmeldungen, Anzahl vergütete Schäden und Schadensumme) pro Gemeinde und Anteil der Ursache. Einmal für das ganze Jahr, einmal für die Sommermonate Juni bis August.
+```{r}
+tbl_jahr <- df %>% group_by(gemeinde, schad_ursache) %>%
+  summarise(Schadensumme = sum(schad_geschaetzt, na.rm = TRUE),
+            Schadenmeldungen = n()) %>% 
+  mutate(Anteil_Schadensumme = Schadensumme / sum(Schadensumme),
+         Anteil_Schadenanzahl = Schadenmeldungen / sum(Schadenmeldungen),
+         Anteil_Schadensumme = formattable::percent((ifelse(is.na(Anteil_Schadensumme), 0, Anteil_Schadensumme))),
+         Anteil_Schadenanzahl = formattable::percent(ifelse(is.na(Anteil_Schadenanzahl), 0, Anteil_Schadenanzahl))) %>%
+  arrange(gemeinde)
+
+# tbl output
+knitr::kable(tbl_jahr,
+             format.args = list(big.mark = "'"))%>%
+             # caption = paste('Zusammenfassung der Schadenmeldungen für', min(jahr), "bis", max(jahr)))%>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+```{r}
+inter_dat <- interval(dmy("01.06.2021"), dmy("31.08.2021"))
+
+tbl_sommer <- df %>% filter(schad_datum %within% inter_dat) %>% 
+  group_by(gemeinde, schad_ursache) %>%
+  summarise(Schadensumme = sum(schad_geschaetzt, na.rm = TRUE),
+            Schadenmeldungen = n()) %>% 
+  mutate(Anteil_Schadensumme = Schadensumme / sum(Schadensumme),
+         Anteil_Schadenmeldungen = Schadenmeldungen / sum(Schadenmeldungen),
+         Anteil_Schadensumme = formattable::percent((ifelse(is.na(Anteil_Schadensumme), 0, Anteil_Schadensumme))),
+         Anteil_Schadenmeldungen = formattable::percent(ifelse(is.na(Anteil_Schadenmeldungen), 0, Anteil_Schadenmeldungen))) %>% 
+  arrange(gemeinde)
+
+# tbl output
+knitr::kable(tbl_sommer,
+             format.args = list(big.mark = "'"))%>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+#### Output: Tabellen ausgeben
+```{r}
+# ## Das gesamte Schadenjahr 2021
+write_excel_csv2(tbl_jahr, "GVZ_Gebäudeschäden_Jahr_2021.csv")
+
+## Nur die Schadenmonate Juni bis August 2021
+write_excel_csv2(tbl_sommer, "GVZ_Gebäudeschäden_Sommer_2021.csv")
+```
+
+
+### Aufgeschlüsselt nach den Sommerereignissen
+Als Ereignis gilt, wenn pro Schadendatum mehr als 100 Schadenmeldungen eingegangen sind
+```{r}
+event <- df %>% filter(schad_datum %within% inter_dat) %>% 
+  group_by(schad_datum) %>% 
+  summarize(Schadenmeldungen = n()) %>% 
+  filter(Schadenmeldungen > 99)
+# events
+```
+
+Als events gelten folgende Daten (Datum + 2 Tage):
+- 07.06.2021
+- 18.06.2021
+- 21.06.2021
+- 28.06.2021
+- 08.07.2021
+- 12.07.2021
+- 15.07.2021
+- 24.07.2021
+
+```{r}
+events <- dmy("07.06.2021", "18.06.2021", "21.06.2021", "28.06.2021",
+              "08.07.2021", "12.07.2021", "15.07.2021", "24.07.2021")
+
+for (i in 1:length(events)){
+  inter_events <- interval(events[i], events[i] + 2)
+  tbl_event <- df %>% filter(schad_datum %within% inter_events) %>% 
+    group_by(gemeinde, schad_ursache) %>%
+    summarise(Schadensumme = sum(schad_geschaetzt, na.rm = TRUE),
+              Schadenmeldungen = n()) %>% 
+    mutate(Anteil_Schadensumme = Schadensumme / sum(Schadensumme),
+           Anteil_Schadenanzahl = Schadenmeldungen / sum(Schadenmeldungen),
+           Anteil_Schadensumme = formattable::percent((ifelse(is.na(Anteil_Schadensumme), 0, Anteil_Schadensumme))),
+           Anteil_Schadenanzahl = formattable::percent(ifelse(is.na(Anteil_Schadenanzahl), 0, Anteil_Schadenanzahl))) %>% 
+    arrange(gemeinde)
+  
+  write_excel_csv2(tbl_event, paste0(events[i], ".csv"))
+}
+```
+
+
+
+

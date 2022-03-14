@@ -1,0 +1,47 @@
+---
+title: "Hailevents"
+author: "Mirco Heidemann"
+date: "2/7/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+
+## Setup paths
+path_data <- "../Data/"
+path_output <- "../Output/"
+```
+
+## Select hailevents
+Select hailevents from GemDat/Rubin Database, relevant from a GVZ perspective
+
+```{r import}
+file_name <- paste0(path_data, "20220207_GemDat_Schaden_Export_Ng.csv")
+
+df_data <- read_delim(file_name, delim = ';',
+                      show_col_types = FALSE) %>% 
+  dplyr::select(ClaimCausation, ClaimIncidentDate, ClaimSum) %>% 
+  filter(ClaimCausation == "Hagel")
+```
+
+Generate table per relevant hail events, sort in descending order according the number of reported claims
+
+```{r tabel}
+df_tbl <- df_data %>%
+  group_by(ClaimIncidentDate) %>% 
+  summarise(loss_chf = round(sum(ClaimSum)),
+            reported_claims = n()) %>% 
+  filter(reported_claims > 999) %>% 
+  arrange(desc(reported_claims))
+```
+
+Write the table to a utf-8 csv file
+```{r output}
+file_output <- "hailevents_gvz.csv"
+#write_excel_csv2(df_tbl, file_output)
+write_excel_csv(df_tbl, file_output, delim = ";")
+```
+

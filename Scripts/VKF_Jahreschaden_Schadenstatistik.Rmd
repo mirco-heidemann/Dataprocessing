@@ -1,0 +1,140 @@
+---
+title: "Schadenzusammenstellung für VKF-Schadenstatistik"
+subtitle: "Letzten drei Jahre für die doppelte Schadenstatistik"
+author: "Mirco Heidemann"
+date: "04/2019"
+output:
+  pdf_document: default
+---
+
+Jedes Jahr erfasst der IRV die Schadenmeldungen der 18 KGV aus den Vorjahren in
+der VKF-Schadenstatistik zusammen. Für die doppelte Schadenstatistik liefert die GVZ Elementar- und Feuerschadendaten der letzten drei Jahre.
+
+Die Daten gehen an Markus Imhof vom IRV, Email: markus.imhof@irv.ch
+
+#### Notes:
+- Per Ereignisdatum (Schadendatum)
+- GESCHAETZTE SCHADENSUMME VERWENDEN (NICHT DIE AUSBEZAHLTE!!)
+
+### Die letzten drei Schadenjahre angeben
+```{r}
+## letzten drei Schadenjahre:
+jahr <- c(2018, 2019, 2020)
+```
+
+```{r setup, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(kableExtra)
+
+## relative pfade
+pth_port <- ("../Portfolio_GVZ/")
+
+## turn off scientific notation
+options(scipen=999)
+```
+
+#### Import aller Schäden bis Ende letzten Jahres
+```{r}
+input_csv <- paste0(pth_port, "schaden_201901.csv")
+
+dat <- read_delim(input_csv, delim = ";",
+           locale = locale(encoding = 'ISO-8859-1'),
+           col_names = TRUE,
+           col_types = cols_only(
+             SchadenId = col_integer(),
+             Ausdr1 = col_integer(),
+             SchadenDatum = col_date("%d.%m.%Y"),
+             SchadenNr = col_character(),
+             GebaeudeZweckText = col_character(),
+             SchadenArtBezeichnung = col_character(),
+             CodTextDt = col_character(),
+             SchadenSumme = col_number(),
+             SbwVerWert = col_number()
+           ))
+```
+
+#### Umbennen der Variablen und filtern nach Elementar- und Feuerschäden sowie nach den letzten drei Jahren
+```{r}
+df <- dat %>% mutate(schad_id = as.integer(SchadenId),
+                     gemeinde_nr = as.integer(Ausdr1),
+                     schad_datum = as.Date(SchadenDatum,"%d.%m.%Y"),
+                     schad_jahr = as.integer(format(schad_datum, "%Y")),
+                     schad_nr =  as.character(SchadenNr),
+                     zweckcode_vkf = as.integer(str_sub(str_extract(GebaeudeZweckText,
+                                                                    "[[:digit:]]+"), 1, 2)),
+                     schad_art = as.character(SchadenArtBezeichnung),
+                     schad_code = as.integer(str_extract(CodTextDt, "[[:digit:]]+")),
+                     schad_ursache = as.character(str_trim(gsub("\\d", "", CodTextDt),
+                                                           "left")),
+                     schad_geschaetzt = round(as.numeric(SchadenSumme)),
+                     vers_summe = as.numeric(SbwVerWert)) %>% 
+  # filter nach den letzten drei jahren, nur elementar- und feuerschäden
+  filter (schad_jahr %in% jahr,
+          schad_art %in% c("Elementar", "Feuer")) %>%
+  dplyr::select(schad_id:vers_summe)
+```
+
+#### TEILAUSZAHLUNGEN
+Doppelte Schaden ID's nur einmal beruecksichtigen!
+Welche schaden ID sind doppelt vorhanden?
+
+```{r}
+df_duplicates <- df %>%
+  group_by(schad_id) %>%
+  filter(n() > 1) %>%
+  ## duplikate nur einmal anzeigen
+  filter(row_number() == 1)
+
+## doppelte schaden ID Zeilen nur einmal
+df <- df %>%
+  ## duplikate nur einmal
+  distinct(schad_id, .keep_all = TRUE)
+```
+
+#### Zusammenfassung der Feuer- und Elementarschäden pro Jahr
+```{r}
+tbl <- df %>% group_by(schad_art, schad_jahr) %>%
+  summarise(schadensumme = sum(schad_geschaetzt, na.rm = TRUE),
+            anzahl = n(),
+            anzahl_verguetet = length(schad_geschaetzt[schad_geschaetzt > 0])) %>% 
+  arrange(schad_jahr)
+
+# tbl output
+knitr::kable(tbl,
+             format.args = list(big.mark = "'"),
+             caption = paste('Zusammenfassung der Schadenmeldungen für', min(jahr), "bis", max(jahr)))%>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+#### Output: Pro Jahr die Feuer- und Elementarschäden in ein separates csv exportieren
+```{r}
+## Feuer
+df_fs <- df %>% 
+  filter(schad_art == "Feuer") %>% 
+  select(gemeinde_nr = gemeinde_nr, schaden_datum = schad_datum, schad_jahr,
+         schaden_nr = schad_nr, zweckcode_vkf = zweckcode_vkf,
+         schadencode_gvz = schad_code, schadenursache = schad_ursache,
+         schadensumme = schad_geschaetzt, vers_summe = vers_summe)
+
+# split df feuer by schadenjahr
+listDf_fs <- df_fs %>% split(.$schad_jahr)
+
+# export pro schadenjahr ein feuerschaden csv
+lapply(1:length(listDf_fs),  function (x) write_excel_csv2(listDf_fs[[x]], path = paste('tbl_feuerschaden_gvz_', names (listDf_fs[x]),'.csv', sep="")))
+
+## Elementar
+df_es <- df %>%
+  filter(schad_art == "Elementar") %>%
+  select(gemeinde_nr = gemeinde_nr, schaden_datum = schad_datum, schad_jahr,
+         schaden_nr = schad_nr, zweckcode_vkf = zweckcode_vkf,
+         schadencode_gvz = schad_code, schadenursache = schad_ursache,
+         schadensumme = schad_geschaetzt, vers_summe = vers_summe)
+
+# split df elementar by schadenjahr
+listDf_es <- df_es %>% split(.$schad_jahr)
+
+# export pro schadenjahr ein feuerschaden csv
+lapply(1:length(listDf_es),  function (x) write_excel_csv2(listDf_es[[x]], path = paste('tbl_elementarschaden_gvz_', names (listDf_es[x]),'.csv', sep="")))
+```
+
