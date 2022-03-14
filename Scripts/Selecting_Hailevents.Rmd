@@ -1,5 +1,5 @@
 ---
-title: "Hailevents"
+title: "Hailevents for the scClim Project"
 author: "Mirco Heidemann"
 date: "2/7/2022"
 output: pdf_document
@@ -15,8 +15,8 @@ path_data <- "../Data/"
 path_output <- "../Output/"
 ```
 
-## Select hailevents
-Select hailevents from GemDat/Rubin Database, relevant from a GVZ perspective
+## scClim: Select hailevents
+Select hail events from GemDat/Rubin Database, relevant from a GVZ perspective
 
 ```{r import}
 file_name <- paste0(path_data, "20220207_GemDat_Schaden_Export_Ng.csv")

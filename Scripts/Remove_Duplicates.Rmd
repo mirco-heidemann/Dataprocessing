@@ -34,8 +34,6 @@ Zur Schaden-Nr 20-3-03009 ist ein Schaden am Wohnhaus (Objektschaden-Nr 20-3-030
 
 Doppelte Schaden-Nr sind somit in Ordnung,  Objektschaden-Nr hingegen sollten nur einmal aufgeführt sein.
 
-Teilauszahlungen und doppelte Schaden-Nr sind in Rubin offenbar kein Thema mehr.
-
 ```{r}
 df_duplicates <- dat %>%
   group_by(ClaimNumber) %>%
