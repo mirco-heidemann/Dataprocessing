@@ -116,7 +116,7 @@ summary(df_loss_complete)
 print(paste0(dim(df_loss)[1]-dim(df_loss_complete)[1], " losses without a current building belonging to demolished buildings. This claims will be lost."))
 ```
 
-Checking coordinates with a simple leaflet map.
+# Checking coordinates
 Transform the LV95 CH-Coords to WGS84 if needed (for example for a leaflet plot).
 ```{r}
 # Convert exposure data frame to sf object
@@ -132,35 +132,69 @@ df_point_loss <- df_loss_complete %>%
 df_point_loss_wgs84 <- st_transform(df_point_exp, 4326)
 ```
 
+## Check exposure data
 Plot a map with ggplot
 ```{r}
-# Exposure
 ggplot(df_point_exp) +
   geom_sf(colour = "blue", size = 1) +
   coord_sf(default_crs = sf::st_crs(2056)) +
   theme_bw()
+```
 
-# Loss
+Plot a leaflet map of exposure data. For better performance, plot n random rows.
+```{r}
+n <- 10000
+# Sample n random rows
+df_sample <- df_point_exp_wgs84 %>% 
+  slice_sample(n = n)
+
+# Extract coordinates for point plotting
+coords <- st_coordinates(df_sample)
+lat = coords[, 2]
+long = coords[,1]
+
+leaflet(data = df_sample) %>%
+  setView(lng=8.60, lat=47.4, zoom = 9) %>% 
+  # addTiles() %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addCircleMarkers(
+    lng = long,
+    lat = lat,
+    color = "blue",
+    opacity = 0.5,
+    radius = 1)
+```
+## Check Loss data
+Plot a map with ggplot.
+```{r}
 ggplot(df_point_loss) +
   geom_sf(colour = "red", size = 1) +
   coord_sf(default_crs = sf::st_crs(2056)) +
   theme_bw()
 ```
 
-
-Plot the leaflet map
+Plot a leaflet map of loss data. For better performance, plot n random rows.
 ```{r}
-leaflet(data = df_point_wgs84) %>%
+n <- 10000
+# Sample n random rows
+df_sample <- df_point_loss_wgs84 %>% 
+  slice_sample(n = n)
+
+# Extract coordinates for point plotting
+coords <- st_coordinates(df_sample)
+lat = coords[, 2]
+long = coords[,1]
+
+leaflet(data = df_sample) %>%
   setView(lng=8.60, lat=47.4, zoom = 9) %>% 
   # addTiles() %>% 
   addProviderTiles(providers$CartoDB.Positron) %>% 
   addCircleMarkers(
-    # does'n work yet
-    lng = ~Y,
-    lat = ~X,
-    color = "green",
-    opacity = 1,
-    radius = 2)
+    lng = long,
+    lat = lat,
+    color = "red",
+    opacity = 0.5,
+    radius = 1)
 ```
 
 Write data as csv files to disk.
