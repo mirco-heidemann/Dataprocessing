@@ -13,6 +13,7 @@ Email: timo.schmid@usys.ethz.ch
 knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
+library(sf)
 library(leaflet)
 
 ## Setup paths
@@ -116,55 +117,50 @@ print(paste0(dim(df_loss)[1]-dim(df_loss_complete)[1], " losses without a curren
 ```
 
 Checking coordinates with a simple leaflet map.
-First, transform the LV95 CH-Coords to WGS84.
+Transform the LV95 CH-Coords to WGS84 if needed (for example for a leaflet plot).
 ```{r}
-# KoordinateOst, KoordinateNord
-p = st_point(c(2678443, 1235256))
-p = st_point(cbind(df_exp$KoordinateOst[1:5], df_exp$KoordinateNord[1:5]))
+# Convert exposure data frame to sf object
+df_point_exp <- df_exp %>%
+  st_as_sf(coords = c("KoordinateOst", "KoordinateNord"), crs = 2056)
+# Transform into a wgs84 coordinat system
+df_point_exp_wgs84 <- st_transform(df_point_exp, 4326)
 
-sfc = st_sfc(p, crs = 2056)
-sfc
-p_trans <- st_transform(sfc, 4326)
-p_trans
-
-
-
-
-coordinates(data.event) <- c("geox","geoy")
-
-  # proj4string(data.event) <- CRS("+init=epsg:21781")
-  proj4string(data.event) <- CRS("+init=epsg:2056")   # LV95
-
-  ## Transform the data to WGS84
-  data.event.WGS84 <- spTransform(data.event, CRS("+init=epsg:4326"))
-
-  data.event.WGS84$X <- as.numeric(data.event.WGS84$geox)
-  data.event.WGS84$Y <- as.numeric(data.event.WGS84$geoy)
-
-
-
-epsg2056 <- leafletCRS(crsClass = "L.Proj.CRS", code = "EPSG:2056",
-  proj4def = "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 +k_0=1 +x_0=2600000 +y_0=1200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs",
-  resolutions = c(4000, 2000),
-  origin = c(2420000, 1350000))
-
-epsg2163 <- leafletCRS(
-  crsClass = "L.Proj.CRS",
-  code = "EPSG:2163",
-  proj4def = "+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 +a=6370997 +b=6370997 +units=m +no_defs",
-  resolutions = 2^(16:7))
+# Convert hail loss data frame to sf object
+df_point_loss <- df_loss_complete %>%
+  st_as_sf(coords = c("KoordinateOst", "KoordinateNord"), crs = 2056)
+# Transform into a wgs84 coordinat system
+df_point_loss_wgs84 <- st_transform(df_point_exp, 4326)
 ```
+
+Plot a map with ggplot
+```{r}
+# Exposure
+ggplot(df_point_exp) +
+  geom_sf(colour = "blue", size = 1) +
+  coord_sf(default_crs = sf::st_crs(2056)) +
+  theme_bw()
+
+# Loss
+ggplot(df_point_loss) +
+  geom_sf(colour = "red", size = 1) +
+  coord_sf(default_crs = sf::st_crs(2056)) +
+  theme_bw()
+```
+
+
 Plot the leaflet map
 ```{r}
-leaflet(data = df_exp[1:20,], options = leafletOptions(crs = epsg2163)) %>%
-  #setView(2420000, 1350000, 9) %>%
-  addTiles()
-
-
+leaflet(data = df_point_wgs84) %>%
   setView(lng=8.60, lat=47.4, zoom = 9) %>% 
   # addTiles() %>% 
   addProviderTiles(providers$CartoDB.Positron) %>% 
-  addCircleMarkers(~long, ~lat)
+  addCircleMarkers(
+    # does'n work yet
+    lng = ~Y,
+    lat = ~X,
+    color = "green",
+    opacity = 1,
+    radius = 2)
 ```
 
 Write data as csv files to disk.
