@@ -8,16 +8,20 @@ Mean losses per peril:
 - Flood, storm and hail
 - With zero claims and without
 
+### Start Coding...
+RMarkdown files are a special case, as they work slightly differently to .R files in terms of file paths, i.e. they behave like mini projects of their own, where the default working directory is where the Rmd file is saved. To save RMarkdown files in a basic folder structure set up, it’s recommended to use the [here package](https://github.com/jennybc/here_here) and its workflow.
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
+library(here)
 ```
 
 Read **loss** into data frame, read gvz index.
 ```{r read}
-file_name_loss <- paste0("Data/", "20220425_GemDat_Schaden_Export_Ng.csv")
-index_gvz <- paste0("Data/", "Versicherungsindex_GVZ.csv")
+# Path workflow for RMarkdown files with here packages
+file_name_loss <- here("Data", "20220425_GemDat_Schaden_Export_Ng.csv")
+index_gvz <- here("Data", "Versicherungsindex_GVZ.csv")
 
 # Read loss data
 df_orig_loss <- read_delim(file_name_loss, delim = ";")
