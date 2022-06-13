@@ -19,45 +19,46 @@ z.B:
 - Unterengstringen
 - Oberengstringen
 ```{r}
-kartierungsgebiet <- 'Zürich'
-t_gem <- c('Zürich')
+char_kartierungsgebiet <- 'Unteres_Sihltal'
+t_gem <- c('Kilchberg', 'Rüschlikon', 'Thalwil', 'Oberrieden', 'Adliswil', 'Langnau am Albis')
 ```
 
 ```{r setup, message = FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(kableExtra)
+library(here)
+
+library(sf)
+library(leaflet)
 
 ## relative pfade
-pth_dat <- ("../../Datadrop/")
-
-## turn off scientific notation
-options(scipen=999)
+pth_dat <- here("Data/")
+path_output <- here("Output/")
 ```
 
 #### Import aller im GemDat eingetragenen Schäden
 Anmerkung: Für die Datenlieferung im Januar 2020 werden die Daten aus dem SQL-Schadendaten Export mit Stand 19.12.2019 verwendet.
 ```{r}
-input_csv <- paste0(pth_dat, "SQL_Schaden_20200120.csv")
+input_csv <- here(pth_dat, "GemDat_Schaden_Export_Ng_20220613.csv")
 
-dat <- read_delim(input_csv, delim = ";",
+dat_orig <- read_delim(input_csv, delim = ";",
            #locale = locale(encoding = 'ISO-8859-1'),
            locale = locale(encoding = 'UTF-8'),
            col_names = TRUE,
            col_types = cols_only(
-             Gemeinde_Nr = col_character(),
-             GebaeudeSuchbegriff = col_character(),
-             SchadenNr = col_character(),
-             SchadenDatum = col_date("%d.%m.%Y"),
-             SchadenUrsache = col_character(),
-             SchadenUrsacheCode = col_character(),
-             HausNr = col_character(),
-             PLZ = col_integer(),
-             Ort = col_character(),
-             KoordinateOrd = col_character(),
-             KoordinateNord = col_character(),
-             GemeindeName = col_character(),
-             SchadenSumme = col_number()
+             # Gemeinde_Nr = col_character(),
+             BuildingAssuranceNumberCant = col_character(),
+             ObjectClaimNumber = col_character(),
+             ClaimIncidentDate = col_date("%d.%m.%Y"),
+             ClaimCausationDetail = col_character(),
+             BuildingStreetNumber = col_character(),
+             BuildingPostCode = col_integer(),
+             MunicipalityName = col_character(),
+             BuildingCoordinateEast = col_character(),
+             BuildingCoordinateNorth = col_character(),
+             # GemeindeName = col_character(),
+             ClaimSumBuilding = col_number()
            ))
 ```
 
@@ -65,50 +66,54 @@ dat <- read_delim(input_csv, delim = ";",
 Doppelte Schaden ID's nur einmal beruecksichtigen!
 Welche schaden ID sind doppelt vorhanden?
 ```{r}
-df_duplicates <- dat %>%
-  group_by(SchadenNr) %>%
+df_duplicates <- dat_orig %>%
+  group_by(ObjectClaimNumber) %>%
   filter(n() > 1) %>%
   ## duplikate nur einmal anzeigen
   filter(row_number() == 1)
 
 ## doppelte schaden ID Zeilen nur einmal
-df <- dat %>%
+df <- dat_orig %>%
   ## duplikate nur einmal
-  distinct(SchadenNr, .keep_all = TRUE)
+  distinct(ObjectClaimNumber, .keep_all = TRUE)
 ```
 
 #### Umbenennen der Variablen gemäss der Datenliederung und filtern nach den relevanten Schäden
 - gewählte Gemeinden
-- 3 Hochwasser, Überschwemmung
-- 4 Erdrutsch, Steinschlag
+- 201: Steinschlag, Felssturz
+- 202: Rutschung, Hangmure, Bodenabsenkung
+- 205: Überschwemmung durch Fliessgewässer
+- 206: Überschwemmung durch Standgewässer
 ```{r}
-df <- df %>% mutate(
-  GemeindNr = as.character(Gemeinde_Nr),
-  GebNr = as.character(GebaeudeSuchbegriff),
-  SchadenNr_Neu = as.character(SchadenNr),
-  Schadendatum = as.Date(SchadenDatum,"%d.%m.%Y"),
-  Ursache = as.character(SchadenUrsache),
-  Ursache_Code = as.character(SchadenUrsacheCode),
-  HausNr_Neu = as.character(HausNr),
-  Plz = as.integer(PLZ),
-  Ort_Neu = as.character(Ort),
-  Ekoord_lv95 = as.character(KoordinateOrd),
-  Nkoord_lv95 = as.character(KoordinateNord),
-  Gemeinde = as.character(GemeindeName),
-  schadsum = as.double(SchadenSumme)) %>% 
+df_out <- df %>% mutate(
+  # GemeindNr = as.character(Gemeinde_Nr),
+  GebNr = as.character(BuildingAssuranceNumberCant),
+  SchadenNr = as.character(ObjectClaimNumber),
+  Schadendatum = as.Date(ClaimIncidentDate,"%d.%m.%Y"),
+  Ursache = as.character(str_trim(gsub("\\d", "", ClaimCausationDetail), "left")),
+  Ursache_Code = as.integer(str_sub(str_extract(ClaimCausationDetail, "[[:digit:]]+"))),
+  HausNr = as.character(BuildingStreetNumber),
+  Plz = as.integer(BuildingPostCode),
+  Gemeinde = as.character(MunicipalityName),
+  Ekoord_lv95 = as.character(BuildingCoordinateEast),
+  Nkoord_lv95 = as.character(BuildingCoordinateNorth),
+  # Gemeinde = as.character(GemeindeName),
+  schadsum = as.double(ClaimSumBuilding)) %>% 
   # filter nach Gemeinde, Schadenursache und Schäden ab 1983
   filter (format(Schadendatum, "%Y") > 1982,
-          SchadenUrsacheCode %in% c("3", "4"),
+          Ursache_Code %in% c(201, 202, 205, 206),
           !is.na(Ekoord_lv95),
           Ekoord_lv95 > 0,
           # Gemeinde Zürich oder Winterthur:
-          grepl('Zürich', Gemeinde)) %>% 
+          # grepl('Zürich', Gemeinde)) %>% 
           # Für alle anderen Gemeinden
-          # Gemeinde %in% t_gem) %>% 
-  dplyr::select(c(GemeindNr:schadsum)) %>% 
-  rename(SchadenNr = SchadenNr_Neu,
-         HausNr = HausNr_Neu,
-         Ort = Ort_Neu)
+          Gemeinde %in% t_gem) %>% 
+  dplyr::select(c(GebNr:schadsum))
+
+# Checking exposure data frames
+cat("\n\n")
+cat("DATA\n-----\n")
+summary(df_out)
 ```
 
 #### Schadeninfo aufbereiten
@@ -120,14 +125,14 @@ Erdrutsch/Steinschlag:
 1: Die GVZ hat einen Erdrusch/Steinschlag Schaden vergütet.
 ```{r}
 # Überschwemmungsschäden
-df_ue <- df %>% 
-  filter(Ursache_Code == 3) %>% 
+df_ue <- df_out %>% 
+  filter(Ursache_Code %in% c(205, 206)) %>% 
   mutate(UES = ifelse(schadsum != 0, 1, 0)) %>% 
   dplyr::select(-c(schadsum, Ursache_Code))
 
 # Erdrutsch- und Steinschlagschäden
-df_er <- df %>% 
-  filter(Ursache_Code == 4) %>% 
+df_er <- df_out %>% 
+  filter(Ursache_Code %in% c(201, 202)) %>% 
   mutate(ER = ifelse(schadsum != 0, 1, 0)) %>% 
   filter(schadsum != 0) %>% 
   dplyr::select(-c(schadsum, Ursache_Code))
@@ -135,6 +140,56 @@ df_er <- df %>%
 
 #### Für die Schadeninformation von Überschwemmung und Erdrutsch/Steinschlag je ein CSV exportieren.
 ```{r}
-write_excel_csv2(df_ue, paste0('Datenlieferung_GVZ_', kartierungsgebiet, '_UES.csv'))
-write_excel_csv2(df_er, paste0('Datenlieferung_GVZ_', kartierungsgebiet, '_ER.csv'))
+file_ue <- paste0('Datenlieferung_GVZ_', char_kartierungsgebiet, '_UES.csv')
+file_er <- paste0('Datenlieferung_GVZ_', char_kartierungsgebiet, '_ER.csv')
+
+write_excel_csv(df_ue, here(path_output, file_ue), delim = ";")
+cat("\n")
+cat(paste("File saved to disk:"), file_ue)
+
+write_excel_csv(df_er, here(path_output, file_er), delim = ";")
+cat("\n")
+cat(paste("File saved to disk:"), file_er)
 ```
+
+
+
+# Checking spatial distribution
+Transform the LV95 CH-Coords to WGS84 if needed (for example for a leaflet plot).
+```{r}
+# Convert data frame to sf object
+df_point <- df_out %>%
+  filter(Ursache_Code %in% c(201, 202)& schadsum != 0 | Ursache_Code %in% c(205, 206)) %>% 
+  st_as_sf(coords = c("Ekoord_lv95", "Nkoord_lv95"), crs = 2056)
+# Transform into a wgs84 coordinat system
+df_point_exp_wgs84 <- st_transform(df_point, 4326)
+```
+
+Plot a leaflet map of exposure data. If basemap doesn't show, change proxy setting!
+```{r}
+# Extract coordinates for point plotting
+coords <- st_coordinates(df_point_exp_wgs84)
+lat = coords[, 2]
+long = coords[,1]
+
+pal <- colorFactor(
+  palette = 'Set1',
+  domain = df_point_exp_wgs84$Ursache)
+
+leaflet(data = df_point_exp_wgs84) %>%
+  setView(lng=8.56, lat=47.3, zoom = 12) %>%
+  # addTiles() %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addCircleMarkers(
+    lng = long,
+    lat = lat,
+    # color = "blue",
+    color = ~pal(Ursache),
+    opacity = 0.5,
+    radius = 1) %>% 
+  addLegend("bottomleft",
+            pal = pal,
+            values = ~Ursache,
+            title = "Schadenursache")
+```
+

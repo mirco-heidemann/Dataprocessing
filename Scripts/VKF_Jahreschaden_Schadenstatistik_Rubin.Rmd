@@ -17,8 +17,8 @@ Die Daten gehen an Markus Imhof vom IRV, Email: markus.imhof@irv.ch
 - Per Ereignisdatum (Schadendatum)
 - GESCHAETZTE SCHADENSUMME VERWENDEN (NICHT DIE AUSBEZAHLTE!!)
 
-**Vorbereitung der Daten:**
-- Export aus GemDat/Rubin: Objektschäden --> Auswertung Objektschäden: Schadendatum und Erfassungsdatum (gleich wie Schadendatum) eingeben
+**Daten aus Rubin exportieren:**
+- Geschäftskontrolle --> Objektschäden --> Auswertung Objektschäden: Schadendatum und Erfassungsdatum (gleich wie Schadendatum) eingeben
 - Sonderzeichen im Header ersetzen
 - Leerschläge, Bindestriche, Punkte im Header mit underline ersetzten respektive löschen
 - Evtl. leere Spalte (W?) löschen
@@ -35,17 +35,18 @@ jahr <- c(2019, 2020, 2021)
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(kableExtra)
+library(here)
 
 ## relative pfade
-pth_port <- ("Data/")
+pth_port <- here("Data/")
 
 ## turn off scientific notation
-options(scipen=999)
+#options(scipen=999)
 ```
 
 #### Import aller Schäden bis Ende letzten Jahres
 ```{r}
-input_csv <- paste0(pth_port, "Objektschaeden_2019_2021.csv")
+input_csv <- here(pth_port, "Objektschaeden_2019_2021.csv")
 
 dat <- read_delim(input_csv, delim = ";",
            #locale = locale(encoding = 'ISO-8859-1'),
@@ -89,7 +90,7 @@ df <- dat %>% mutate(schad_id = as.character(Objektschadennummer),
 ```
 
 #### Doppelte Schadenerfassung in GemDat/Rubin Objektschaden-Nr
-In GemDat/Rubin wird neben der Schaden-Nr neu eine Objektschaden-Nr geführt. Zu einer Schaden-Nr in Rubin können mehrere Objekte gehören.
+In GemDat/Rubin wird neben der Schaden-Nr neu eine Objektschaden-Nr (Police) geführt. Zu einer Schaden-Nr in Rubin können mehrere Objekte (Gebäude) gehören.
 Beispiel:
 Zur Schaden-Nr 20-3-03009 ist ein Schaden am Wohnhaus (Objektschaden-Nr 20-3-03009-1) und ein Schaden am Garagengebäude (Objektschaden-Nr 20-3-03009-2) erfasst.
 
