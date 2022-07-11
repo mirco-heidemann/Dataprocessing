@@ -9,12 +9,11 @@ Das Projekt untersucht die Auswirkungen der Unwetter 2021 mit einem historischen
 Kontaktperson ist Adhurim Haxhimusa, E-Mail: adhurim.haxhimusa@fhgr.ch
 
 Anmerkungen zu den Daten:
-- Die Daten sind gemäss dem Template vom Dezember 2021 aufbereitet (scClim_Daten_Template_GVZ.xlsx).
 - Das Exposure beinhaltet den gesamten Bestand der bei der GVZ versicherten Gebäude - also fast alle Gebäude im Kanton Zürich. Manche Bundesbauten, wie beispielsweise das Landesmuseum oder auch die ETH Gebäude gehören nicht dazu. Bauprojekte welche noch nicht fertig umgesetzt sind und von der GVZ geschätzt wurden gehören auch nicht dazu.
 - Stand für die Exposure Daten ist der 31.12.2021
 
 - Die Schadendaten umfassen alle, bei der GVZ gemeldeten Elementarschäden im Zeitraum vom 01.01.2000 bis 01.06.2022
-- Die Schadendaten umfassen somit auch Schäden mit Schadensumme 0 (abgelehnt, unter Selbstbehalt, nicht bei der GVZ versichert, usw.).
+- Die Schadendaten umfassen auch Schäden mit Schadensumme 0 (abgelehnt, unter Selbstbehalt, nicht bei der GVZ versichert, usw.).
 - Die Schadensummen gelten für den gesamten Schadenbetrag, einschliesslich des Selbstbehalts (Ground Up Loss).
 - Die Schadendaten sind konsistent mit den Exposure Daten. D.h. die Schäden beziehen sich auf die Gebäude welche zum 01.01.2022 versichert sind, respektive für welche eine Police vorliegt. Schäden an Gebäuden welche unterdessen abgebrochen sind, sind in den Schadendaten NICHT enthalten. Für diese Gebäude - in unserem Fall rund 1'600 Schäden, respektive 2 % vom gesamten Schadenbestand über die gesamte Zeitspanne - liegen uns keine Koordinaten vor.
 
@@ -47,7 +46,7 @@ Anmerkungen zu den Daten:
 
 - GVZ Versicherungsindex
 
-**Objektschutzberatungen**
+**Objektschutzberatungen --> separate Excel Liste, nicht in R aufbereitet**
 - VersicherungsID
 - Empfohlene Gebäudeschutzmassnahme
 - Schutzziei
@@ -68,7 +67,6 @@ path_output <- "../Output/"
 file_name_exp <- paste0(path_data, "20220707_Exposure_GVZ.csv")
 # evtl. for baujahr: file_name_rubin <- paste0(path_data, "....csv")
 file_name_loss <- paste0(path_data, "20220707_Schaden_GVZ.csv")
-file_name_prevent <- paste0(path_data, "....csv")
 index_gvz <- paste0(path_data, "Versicherungsindex_GVZ.csv")
 ```
 
@@ -95,11 +93,6 @@ df_index <- read_delim(index_gvz, delim = ";",
                        col_select = c(1,3)) %>% 
   mutate(Jahr = format(as.Date(Jahr, "%d.%m.%Y"), "%Y")) %>% 
   rename(Index = `Versicherungsindex GVZ`)
-```
-
-```{r}
-# Read "GVZ Präventionsberatungen"
-df_index <- read_delim(file_name_prevent, delim = ";")
 ```
 
 Data wrangling: Rename, re-shape, join gvz-index and coordinates, filter non-Na's, only elementar losses, ...
@@ -133,7 +126,10 @@ df_loss <- df_orig_loss %>%
          Schadennummer = ObjectClaimNumber,
          Schadendatum = ClaimIncidentDate,
          Schadensumme = ClaimSumBuilding) %>% 
-  mutate(Schadendatum = as.Date(Schadendatum, "%d.%m.%Y"),
+  mutate(Schadenursache_Detail = as.character(str_trim(gsub("\\d", "",
+                                                            Schadenursache_Detail),
+                                                       "left")),
+         Schadendatum = as.Date(Schadendatum, "%d.%m.%Y"),
          Schadenjahr = format(Schadendatum, "%Y")) %>%
   ## Alle Elementargefahren
   filter(Schadenursache %in% c("Erdrutsch", "Hagel", "Schneedruck, Lawinen",
@@ -146,7 +142,6 @@ df_loss <- df_orig_loss %>%
 df_loss_complete <- df_exp %>% 
   ## !! Remember: Loss data without exposure - demolished buildings - are lost
   inner_join(df_loss, by = c("VersicherungsID" = "VersicherungsID")) %>% 
-  mutate(Schadendatum = format(Schadendatum, "%d%m%Y")) %>% 
   dplyr::select(-c(Schadenjahr, Schadenursache))
 
 # Checking exposure data frames
@@ -304,7 +299,12 @@ leaflet(data = df_sample) %>%
 
 Write data as csv files to disk.
 ```{r}
-write_excel_csv(df_exp, paste0(path_output, "GVZ_Exposure_202201.csv"), delim = ";")
-write_excel_csv(df_loss_complete, paste0(path_output, "GVZ_Hail_Loss_200001_to_202203.csv"), delim = ";")
+write_excel_csv(df_exp, paste0(path_output, "GVZ_Exposure_20211231.csv"), delim = ";")
+write_excel_csv(df_loss_complete, paste0(path_output, "GVZ_Elementar_Loss_20000101_to_202200601.csv"), delim = ";")
+
+cat("\n")
+cat(paste0("File saved to", path_output, "GVZ_Exposure_20211231.csv"))
+cat("\n")
+cat(paste0("File saved to", path_output, "GVZ_Elementar_Loss_20000101_to_202200601.csv"))
 ```
 
