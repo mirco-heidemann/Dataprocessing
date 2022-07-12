@@ -17,7 +17,8 @@ Die Daten gehen an Ewa Kozlowski vom IRV, Email: ewa.kozlowski@kgv.ch
 
 #### Notes:
 - Per Ereignisdatum (Schadendatum)
-- GESCHAETZTE SCHADENSUMME VERWENDEN (NICHT DIE AUSBEZAHLTE!!)
+- Schadensumme: gibt solange den Wert der einzelnen, geschätzten Schadenpositionen an, bis dem gegenüber im Zuge der Abrechnung die effektiven Kosten gegenüberstehen. Sind also Positionen im Schadenfall vorhanden, die noch nicht aufgrund effektiver Kosten ausbezahlt wurden, fliesst bei der Position die geschätzte Summe der Einzelposition ein. Wurde eine weitere Position bereits ausbezahlt (zB Akontorechnung), fliesst das Feld (Anspruch Kunde) der Schadenposition in die Schadensumme ein und aktualisiert entsprechend die ursprünglich abgeschätzte Schadensumme. Bei der Schadensumme ist der Selbstbehalt noch NICHT abgezogen.
+
 
 **Daten aus Rubin exportieren:**
 - Geschäftskontrolle --> Objektschäden --> Nur Gebäudestatus "Pendent" und "Erledigt" auswählen --> Anzeigen --> Alle Spalten -- > Kopieren --> In Excel einfügen
